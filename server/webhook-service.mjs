@@ -3,7 +3,9 @@
 // app principal (TanStack Start) pra não depender de nada experimental ali.
 //
 // Endpoints:
-//   GET  /api/account                -> retorna a conta padrão (dono do site)
+//   GET  /api/account?external_id=X  -> retorna a conta desse cliente (sem o
+//                                        parâmetro, retorna a conta padrão,
+//                                        dono do site — usada como preview)
 //   POST /api/webhooks/wallet        -> recebe eventos e atualiza a carteira do cliente
 //
 // Variáveis de ambiente:
@@ -67,7 +69,6 @@ const seedDefault = db.prepare(`
 seedDefault.run(DEFAULT_EXTERNAL_ID, "Teodosio Real", "@teodosio", 7500, 124000, 312, 89000, 28000, 7000);
 
 const getAccountByExternalId = db.prepare(`SELECT * FROM accounts WHERE external_id = ?`);
-const getDefaultAccount = db.prepare(`SELECT * FROM accounts WHERE external_id = ?`);
 const insertAccount = db.prepare(`
   INSERT INTO accounts (external_id, name, handle) VALUES (?, ?, ?)
 `);
@@ -129,7 +130,13 @@ const server = createServer(async (req, res) => {
   res.setHeader("content-type", "application/json; charset=utf-8");
 
   if (req.method === "GET" && url.pathname === "/api/account") {
-    const row = getDefaultAccount.get(DEFAULT_EXTERNAL_ID);
+    const requestedId = url.searchParams.get("external_id");
+    const row = getAccountByExternalId.get(requestedId || DEFAULT_EXTERNAL_ID);
+    if (!row) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ ok: false, error: "conta não encontrada" }));
+      return;
+    }
     res.writeHead(200);
     res.end(JSON.stringify(toPublicAccount(row)));
     return;

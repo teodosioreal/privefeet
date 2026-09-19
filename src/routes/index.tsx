@@ -214,6 +214,31 @@ const DEFAULT_ACCOUNT: Account = {
   gorjetas: 70,
 };
 
+const VISITOR_ID_STORAGE_KEY = "privefeet_uid";
+
+// Identifica QUAL cliente está vendo a página, pra cada um enxergar só a
+// própria carteira. O "outro site" manda o cliente pra cá com o link
+// https://privefeet.pro/?u=<external_id>; aqui a gente lê isso uma vez e
+// guarda no navegador dela, pra continuar funcionando mesmo se ela navegar
+// pra /termos e voltar, ou fechar e abrir o site de novo sem o link.
+function resolveVisitorId(): string | null {
+  if (typeof window === "undefined") return null;
+  const fromUrl = new URLSearchParams(window.location.search).get("u");
+  if (fromUrl) {
+    try {
+      window.localStorage.setItem(VISITOR_ID_STORAGE_KEY, fromUrl);
+    } catch {
+      // localStorage indisponível (modo privado, navegador bloqueando etc.)
+    }
+    return fromUrl;
+  }
+  try {
+    return window.localStorage.getItem(VISITOR_ID_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -273,7 +298,9 @@ function Dashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/account")
+    const uid = resolveVisitorId();
+    const url = uid ? `/api/account?external_id=${encodeURIComponent(uid)}` : "/api/account";
+    fetch(url)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled && data) setAccount(data);
