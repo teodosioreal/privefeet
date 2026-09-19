@@ -7,12 +7,16 @@
 //                                        parâmetro, retorna a conta padrão,
 //                                        dono do site — usada como preview)
 //   POST /api/webhooks/wallet        -> recebe eventos e atualiza a carteira do cliente
+//   GET  /api/auction/current        -> retorna o leilão atual (status, prazo, lances)
+//   POST /api/webhooks/auction       -> recebe eventos do servidor de leilão externo
 //
 // Variáveis de ambiente:
-//   PORT             (padrão 3021)
-//   WEBHOOK_SECRET    obrigatório — o "outro site" precisa mandar esse valor
-//                      no header X-Webhook-Secret em toda chamada ao webhook.
-//   DB_PATH           (padrão ./data/privefeet.db)
+//   PORT                    (padrão 3021)
+//   WEBHOOK_SECRET           obrigatório — o "outro site" precisa mandar esse valor
+//                             no header X-Webhook-Secret em toda chamada ao webhook da carteira.
+//   AUCTION_WEBHOOK_SECRET   obrigatório — segredo separado pro servidor de leilão,
+//                             enviado no header X-Webhook-Secret nas chamadas a /api/webhooks/auction.
+//   DB_PATH                  (padrão ./data/privefeet.db)
 
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
@@ -21,10 +25,15 @@ import { dirname } from "node:path";
 
 const PORT = Number(process.env.PORT || 3021);
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+const AUCTION_WEBHOOK_SECRET = process.env.AUCTION_WEBHOOK_SECRET;
 const DB_PATH = process.env.DB_PATH || "./data/privefeet.db";
 
 if (!WEBHOOK_SECRET) {
   console.error("WEBHOOK_SECRET não definido. Configure a variável de ambiente antes de iniciar.");
+  process.exit(1);
+}
+if (!AUCTION_WEBHOOK_SECRET) {
+  console.error("AUCTION_WEBHOOK_SECRET não definido. Configure a variável de ambiente antes de iniciar.");
   process.exit(1);
 }
 
@@ -56,6 +65,27 @@ db.exec(`
     raw_payload TEXT,
     received_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS auctions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    external_id TEXT UNIQUE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active', -- 'active' | 'ended'
+    ends_at TEXT NOT NULL,
+    winner_name TEXT,
+    winner_amount_centavos INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS auction_bids (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    auction_id INTEGER NOT NULL REFERENCES auctions(id),
+    external_event_id TEXT UNIQUE,
+    bidder_name TEXT NOT NULL,
+    bidder_flag TEXT,
+    amount_centavos INTEGER NOT NULL,
+    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Conta padrão exibida no painel hoje (dono do site), seedada uma vez com
@@ -84,6 +114,41 @@ const bumpCategoria = {
   colecoes: db.prepare(`UPDATE accounts SET colecoes_centavos = colecoes_centavos + ?, updated_at = datetime('now') WHERE id = ?`),
   gorjetas: db.prepare(`UPDATE accounts SET gorjetas_centavos = gorjetas_centavos + ?, updated_at = datetime('now') WHERE id = ?`),
 };
+
+const getAuctionByExternalId = db.prepare(`SELECT * FROM auctions WHERE external_id = ?`);
+const getLatestAuction = db.prepare(`SELECT * FROM auctions ORDER BY id DESC LIMIT 1`);
+const insertAuction = db.prepare(`
+  INSERT INTO auctions (external_id, status, ends_at) VALUES (?, 'active', ?)
+`);
+const updateAuctionEndsAt = db.prepare(`UPDATE auctions SET ends_at = ?, updated_at = datetime('now') WHERE id = ?`);
+const endAuction = db.prepare(`
+  UPDATE auctions SET status = 'ended', winner_name = ?, winner_amount_centavos = ?, updated_at = datetime('now') WHERE id = ?
+`);
+const insertBid = db.prepare(`
+  INSERT OR IGNORE INTO auction_bids (auction_id, external_event_id, bidder_name, bidder_flag, amount_centavos)
+  VALUES (?, ?, ?, ?, ?)
+`);
+const getBidsForAuction = db.prepare(`
+  SELECT bidder_name, bidder_flag, amount_centavos FROM auction_bids
+  WHERE auction_id = ? ORDER BY amount_centavos DESC LIMIT 20
+`);
+
+function toPublicAuction(row) {
+  if (!row) return null;
+  const bids = getBidsForAuction.all(row.id).map((b) => ({
+    name: b.bidder_name,
+    flag: b.bidder_flag || "🏳️",
+    amount: b.amount_centavos / 100,
+  }));
+  return {
+    externalId: row.external_id,
+    status: row.status,
+    endsAt: row.ends_at,
+    winnerName: row.winner_name,
+    winnerAmount: row.winner_amount_centavos != null ? row.winner_amount_centavos / 100 : null,
+    bids,
+  };
+}
 
 function toPublicAccount(row) {
   return {
@@ -210,6 +275,106 @@ const server = createServer(async (req, res) => {
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, duplicate: isDuplicate, account: toPublicAccount(updated) }));
     return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/auction/current") {
+    const row = getLatestAuction.get();
+    if (!row) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ ok: false, error: "nenhum leilão ainda" }));
+      return;
+    }
+    res.writeHead(200);
+    res.end(JSON.stringify(toPublicAuction(row)));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/webhooks/auction") {
+    const providedSecret = req.headers["x-webhook-secret"];
+    if (typeof providedSecret !== "string" || !timingSafeEqual(providedSecret, AUCTION_WEBHOOK_SECRET)) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "unauthorized" }));
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+      return;
+    }
+
+    const { type, external_id, event_id } = body;
+    const validTypes = ["start", "bid", "end"];
+    if (typeof external_id !== "string" || !external_id) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "external_id é obrigatório" }));
+      return;
+    }
+    if (!validTypes.includes(type)) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: `type deve ser um de: ${validTypes.join(", ")}` }));
+      return;
+    }
+
+    if (type === "start") {
+      const { ends_at } = body;
+      if (typeof ends_at !== "string" || Number.isNaN(Date.parse(ends_at))) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: "ends_at deve ser uma data ISO válida" }));
+        return;
+      }
+      let auction = getAuctionByExternalId.get(external_id);
+      if (!auction) {
+        insertAuction.run(external_id, ends_at);
+      } else {
+        updateAuctionEndsAt.run(ends_at, auction.id);
+      }
+      const saved = getAuctionByExternalId.get(external_id);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, auction: toPublicAuction(saved) }));
+      return;
+    }
+
+    // "bid" e "end" precisam de um leilão já existente
+    const auction = getAuctionByExternalId.get(external_id);
+    if (!auction) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ ok: false, error: `leilão "${external_id}" não encontrado — mande um evento "start" primeiro` }));
+      return;
+    }
+
+    if (type === "bid") {
+      const { bidder_name, bidder_flag, amount } = body;
+      if (typeof bidder_name !== "string" || !bidder_name) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: "bidder_name é obrigatório" }));
+        return;
+      }
+      if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: "amount deve ser numérico e maior que zero" }));
+        return;
+      }
+      insertBid.run(auction.id, event_id ?? null, bidder_name, bidder_flag ?? null, Math.round(amount * 100));
+      const saved = getAuctionByExternalId.get(external_id);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, auction: toPublicAuction(saved) }));
+      return;
+    }
+
+    if (type === "end") {
+      const { winner_name, winner_amount } = body;
+      const winnerAmountCentavos =
+        typeof winner_amount === "number" && Number.isFinite(winner_amount) ? Math.round(winner_amount * 100) : null;
+      endAuction.run(winner_name ?? null, winnerAmountCentavos, auction.id);
+      const saved = getAuctionByExternalId.get(external_id);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, auction: toPublicAuction(saved) }));
+      return;
+    }
   }
 
   res.writeHead(404);

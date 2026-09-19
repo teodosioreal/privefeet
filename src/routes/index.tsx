@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Apple,
@@ -159,16 +159,20 @@ const topCreators = [
   { name: "Amandaflow", handle: "@amandaflow", vendas: 22, seguidores: 190, arrecadado: "R$ 2.880,00" },
 ];
 
-// ===== Leilão (barra superior + popup de lances) =====
-const AUCTION_SECONDS = 120; // duração do contador: 2 minutos
+// ===== Leilão real (barra superior + popup de lances) =====
+// Dados vêm do servidor de leilão externo via webhook (POST /api/webhooks/auction);
+// aqui só buscamos o estado atual (GET /api/auction/current) periodicamente.
+type AuctionBid = { name: string; flag: string; amount: number };
+type Auction = {
+  externalId: string;
+  status: "active" | "ended";
+  endsAt: string;
+  winnerName: string | null;
+  winnerAmount: number | null;
+  bids: AuctionBid[];
+};
 
-const auctionBids = [
-  { flag: "🇦🇪", name: "Ahmed bin Zayed", amount: "R$ 133,71" },
-  { flag: "🇸🇦", name: "Faisal bin Mohammed", amount: "R$ 124,99" },
-  { flag: "🇴🇲", name: "Asaad Al-Harthy", amount: "R$ 111,32" },
-  { flag: "🇸🇦", name: "Bandar Al-Qahtani", amount: "R$ 106,16" },
-  { flag: "🇸🇦", name: "Abdulaziz Al-Rashid", amount: "R$ 96,46" },
-];
+const AUCTION_POLL_MS = 5000;
 
 function formatCountdown(totalSeconds: number) {
   const m = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
@@ -275,8 +279,10 @@ function Avatar({ name, photo, size = "md" }: { name: string; photo?: string; si
 }
 
 function Dashboard() {
-  const [secondsLeft, setSecondsLeft] = useState(AUCTION_SECONDS);
+  const [auction, setAuction] = useState<Auction | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
   const [showBids, setShowBids] = useState(false);
+  const autoOpenedForRef = useRef<string | null>(null); // evita reabrir o popup pro mesmo leilão
   const [showPlan, setShowPlan] = useState(false);
   const [planCycle, setPlanCycle] = useState<"mensal" | "anual">("anual");
   const [account, setAccount] = useState<Account>(DEFAULT_ACCOUNT);
@@ -313,19 +319,55 @@ function Dashboard() {
     };
   }, []);
 
+  // Busca o leilão atual no servidor e continua checando periodicamente —
+  // é assim que lances de gente real (mandados pelo servidor de leilão
+  // externo via webhook) chegam na tela sem precisar recarregar a página.
   useEffect(() => {
-    if (secondsLeft <= 0) {
-      setShowBids(true);
+    let cancelled = false;
+    const poll = () => {
+      fetch("/api/auction/current")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!cancelled) setAuction(data);
+        })
+        .catch(() => {
+          // servidor de leilão fora do ar por enquanto: mantém o último estado conhecido.
+        });
+    };
+    poll();
+    const interval = setInterval(poll, AUCTION_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Conta regressiva calculada a partir do horário real de término (não é
+  // mais um timer fixo do navegador) — continua certa mesmo entre um poll e outro.
+  useEffect(() => {
+    if (!auction || auction.status !== "active") {
+      setSecondsLeft(0);
       return;
     }
-    const t = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
-    return () => clearTimeout(t);
-  }, [secondsLeft]);
+    const tick = () => {
+      const diff = Math.round((new Date(auction.endsAt).getTime() - Date.now()) / 1000);
+      setSecondsLeft(Math.max(0, diff));
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [auction?.endsAt, auction?.status]);
 
-  const closeBids = () => {
-    setShowBids(false);
-    setSecondsLeft(AUCTION_SECONDS); // recomeça a contagem de 2 minutos
-  };
+  // Abre o popup de lances sozinho quando o leilão encerra — só uma vez por
+  // leilão, pra não reabrir toda vez que o usuário fechar e um novo poll chegar.
+  useEffect(() => {
+    if (auction?.status === "ended" && autoOpenedForRef.current !== auction.externalId) {
+      setShowBids(true);
+      autoOpenedForRef.current = auction.externalId;
+    }
+  }, [auction]);
+
+  const closeBids = () => setShowBids(false);
 
   const closePlan = () => setShowPlan(false);
 
@@ -349,20 +391,30 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Notificação superior — próximo leilão */}
+      {/* Notificação superior — leilão real (dados do servidor externo) */}
       <div
         className="fixed inset-x-0 top-0 z-40 text-brand-foreground"
         style={{ background: "var(--gradient-brand)", boxShadow: "0 6px 24px -12px rgba(0,0,0,0.4)" }}
       >
         <div className="mx-auto flex max-w-[1400px] items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/70" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-          </span>
-          <span>Próximo leilão em</span>
-          <span className="rounded-lg bg-white/20 px-2 py-0.5 text-base font-extrabold tabular-nums tracking-tight">
-            {formatCountdown(Math.max(secondsLeft, 0))}
-          </span>
+          {auction?.status === "active" && (
+            <>
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/70" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
+              </span>
+              <span>Próximo leilão em</span>
+              <span className="rounded-lg bg-white/20 px-2 py-0.5 text-base font-extrabold tabular-nums tracking-tight">
+                {formatCountdown(secondsLeft)}
+              </span>
+            </>
+          )}
+          {auction?.status === "ended" && (
+            <button onClick={() => setShowBids(true)} className="underline decoration-white/50 underline-offset-2 hover:decoration-white">
+              Leilão encerrado · ver resultado
+            </button>
+          )}
+          {!auction && <span className="text-white/85">Nenhum leilão no momento</span>}
         </div>
       </div>
 
@@ -571,8 +623,8 @@ function Dashboard() {
         </aside>
       </div>
 
-      {/* Popup — Últimos lances do leilão */}
-      {showBids && (
+      {/* Popup — Últimos lances do leilão (dados reais) */}
+      {showBids && auction && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4 backdrop-blur-sm"
           onClick={closeBids}
@@ -587,7 +639,7 @@ function Dashboard() {
               style={{ background: "var(--gradient-brand)" }}
             >
               <h3 className="flex items-center gap-2 text-lg font-extrabold">
-                <Crown className="h-5 w-5" /> Últimos lances
+                <Crown className="h-5 w-5" /> {auction.status === "ended" ? "Leilão encerrado" : "Últimos lances"}
               </h3>
               <button
                 onClick={closeBids}
@@ -598,29 +650,45 @@ function Dashboard() {
               </button>
             </div>
 
-            <ul className="divide-y divide-border">
-              {auctionBids.map((bid, i) => (
-                <li
-                  key={bid.name}
-                  className={`flex items-center gap-3 px-5 py-3.5 ${i === 0 ? "bg-accent" : ""}`}
-                >
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-muted text-xl">
-                    {bid.flag}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{bid.name}</p>
-                    {i === 0 && (
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-brand">
-                        Lance mais alto
-                      </p>
-                    )}
-                  </div>
-                  <span className="ml-auto shrink-0 text-base font-extrabold tabular-nums tracking-tight">
-                    {bid.amount}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            {auction.status === "ended" && auction.winnerName && (
+              <div className="mx-5 mt-4 rounded-2xl bg-accent p-4 text-center">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-brand">Vencedor do leilão</p>
+                <p className="mt-1 text-base font-bold">{auction.winnerName}</p>
+                {auction.winnerAmount != null && (
+                  <p className="text-sm text-muted-foreground">{formatBRL(auction.winnerAmount)}</p>
+                )}
+              </div>
+            )}
+
+            {auction.bids.length === 0 ? (
+              <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+                Ainda não chegou nenhum lance nesse leilão.
+              </p>
+            ) : (
+              <ul className="mt-2 divide-y divide-border">
+                {auction.bids.map((bid, i) => (
+                  <li
+                    key={`${bid.name}-${i}`}
+                    className={`flex items-center gap-3 px-5 py-3.5 ${i === 0 ? "bg-accent" : ""}`}
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-muted text-xl">
+                      {bid.flag}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{bid.name}</p>
+                      {i === 0 && (
+                        <p className="text-[11px] font-bold uppercase tracking-wide text-brand">
+                          Lance mais alto
+                        </p>
+                      )}
+                    </div>
+                    <span className="ml-auto shrink-0 text-base font-extrabold tabular-nums tracking-tight">
+                      {formatBRL(bid.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
 
             <div className="p-5 pt-3">
               <button
