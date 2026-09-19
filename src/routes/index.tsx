@@ -121,11 +121,17 @@ function shuffle<T>(arr: T[]): T[] {
 
 const MAX_EXTRA_PAGES = 5; // depois disso, para de carregar e mostra o rodapé
 
+// Continua a mesma rotação usada nos posts iniciais (images[i % length]) em
+// vez de reiniciar do zero a cada lote — assim toda foto/avatar fica sempre
+// a exatamente "tamanho do pool" posts de distância da última vez que
+// apareceu (o máximo espaçamento possível), do início ao fim do feed. Quem
+// embaralha é só a ordem de quais criadoras aparecem, não as fotos.
 function buildExtraPage(pageIndex: number): Post[] {
+  const startIndex = rawPosts.length * (pageIndex + 1);
   return shuffle(rawPosts).map((p, i) => ({
     ...p,
-    image: images[(pageIndex * 7 + i) % images.length]!,
-    avatar: avatarImages[(pageIndex * 3 + i) % avatarImages.length]!,
+    image: images[(startIndex + i) % images.length]!,
+    avatar: avatarImages[(startIndex + i) % avatarImages.length]!,
     time: FRESH_TIME_LABELS[i % FRESH_TIME_LABELS.length]!,
   }));
 }
