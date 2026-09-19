@@ -204,6 +204,7 @@ function formatAED(brlAmount: number): string {
 type Account = {
   name: string;
   handle: string;
+  avatar: string | null;
   saldo: number;
   esteMes: number;
   seguidores: number;
@@ -216,6 +217,7 @@ type Account = {
 const DEFAULT_ACCOUNT: Account = {
   name: "Teodosio Real",
   handle: "@teodosio",
+  avatar: null,
   saldo: 75,
   esteMes: 1240,
   seguidores: 312,
@@ -527,7 +529,7 @@ function Dashboard() {
           </div>
 
           <div className="flex items-center gap-3 rounded-2xl bg-muted p-3">
-            <Avatar name={account.name} size="sm" />
+            <Avatar name={account.name} photo={account.avatar ?? undefined} size="sm" />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{account.name}</p>
               <p className="truncate text-xs text-muted-foreground">{account.handle}</p>
@@ -567,7 +569,7 @@ function Dashboard() {
               <button className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-muted-foreground">
                 <Bell className="h-5 w-5" />
               </button>
-              <Avatar name={account.name} size="sm" />
+              <Avatar name={account.name} photo={account.avatar ?? undefined} size="sm" />
             </div>
           </header>
 

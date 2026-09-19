@@ -16,6 +16,7 @@
 //   POST /api/webhooks/lead          -> recebe o formulário de recrutamento externo,
 //                                        cria/atualiza a conta e devolve um link de acesso único
 //   GET  /api/auth/claim?token=X     -> troca o link de uso único por uma sessão de verdade
+//   GET  /api/leads/:arquivo         -> serve a foto que ela mandou no formulário (avatar do perfil)
 //
 // Variáveis de ambiente:
 //   PORT                    (padrão 3021)
@@ -31,7 +32,7 @@
 
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual as cryptoTimingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
@@ -125,6 +126,7 @@ for (const [name, def] of [
   ["phone", "TEXT"],
   ["username", "TEXT"],
   ["password_hash", "TEXT"],
+  ["avatar_path", "TEXT"],
 ]) {
   if (!accountColumns.some((c) => c.name === name)) {
     db.exec(`ALTER TABLE accounts ADD COLUMN ${name} ${def}`);
@@ -205,6 +207,9 @@ const insertLeadAccount = db.prepare(`
 const updateLeadAccountName = db.prepare(`
   UPDATE accounts SET name = ?, updated_at = datetime('now') WHERE id = ?
 `);
+const updateAccountAvatar = db.prepare(`
+  UPDATE accounts SET avatar_path = ?, updated_at = datetime('now') WHERE id = ?
+`);
 const insertLeadSubmission = db.prepare(`
   INSERT INTO lead_submissions
     (account_id, data_nascimento, idade, genero, respostas_json, foto_path, origem)
@@ -278,6 +283,7 @@ function toPublicAccount(row) {
     externalId: row.external_id,
     name: row.name,
     handle: row.handle,
+    avatar: row.avatar_path ? `/api/leads/${row.avatar_path.split("/").pop()}` : null,
     saldo: row.saldo_centavos / 100,
     esteMes: row.mes_centavos / 100,
     seguidores: row.seguidores,
@@ -566,6 +572,33 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // Serve as fotos enviadas no formulário de recrutamento (viram o avatar
+  // do perfil). Só aceita nomes no formato exato que a gente mesmo gera
+  // (uuid.extensão) — nada de caminho vindo da URL, pra não abrir brecha
+  // de ler qualquer arquivo do servidor.
+  if (req.method === "GET" && url.pathname.startsWith("/api/leads/")) {
+    const filename = url.pathname.slice("/api/leads/".length);
+    const safe = /^[a-f0-9-]{36}\.(jpg|jpeg|png|webp)$/i.test(filename);
+    if (!safe) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "nome de arquivo inválido" }));
+      return;
+    }
+    const filePath = join(dirname(DB_PATH), "leads", filename);
+    if (!existsSync(filePath)) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ ok: false, error: "não encontrado" }));
+      return;
+    }
+    const ext = filename.split(".").pop().toLowerCase();
+    const contentType = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" }[ext];
+    res.setHeader("content-type", contentType);
+    res.setHeader("cache-control", "public, max-age=86400");
+    res.writeHead(200);
+    res.end(readFileSync(filePath));
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/auth/logout") {
     const token = parseCookies(req)[SESSION_COOKIE];
     if (token) deleteSession.run(token);
@@ -660,6 +693,11 @@ async function handleRequest(req, res) {
       fotoPath,
       body.origem || null,
     );
+
+    // A foto que ela mandou vira o avatar de verdade do perfil/carteira dela.
+    if (fotoPath) {
+      updateAccountAvatar.run(fotoPath, account.id);
+    }
 
     const claimToken = randomBytes(32).toString("hex");
     const claimExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
