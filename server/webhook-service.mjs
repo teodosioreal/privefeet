@@ -36,6 +36,11 @@
 //                             Se não definido, esse endpoint fica desativado (503), sem derrubar o resto.
 //   PUBLIC_SITE_URL          (padrão https://privefeet.pro) — usado pra montar o link de acesso único.
 //   DB_PATH                  (padrão ./data/privefeet.db)
+//   WHATSAPP_API_URL         opcional — endpoint da SUA API de WhatsApp (esqueleto pronto pra
+//                             qualquer instância própria — ver sendWhatsAppConfirmation abaixo pra
+//                             ajustar o formato exato assim que tiver os dados da instância).
+//                             Se não definido, o envio é só pulado (não derruba o cadastro).
+//   WHATSAPP_API_TOKEN       opcional — token/chave de autenticação da sua instância.
 
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
@@ -55,6 +60,10 @@ const AUCTION_WEBHOOK_SECRET = process.env.AUCTION_WEBHOOK_SECRET;
 const LEAD_WEBHOOK_SECRET = process.env.LEAD_WEBHOOK_SECRET || "";
 const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://privefeet.pro";
 const DB_PATH = process.env.DB_PATH || "./data/privefeet.db";
+// Sem provedor de WhatsApp definido ainda — fica desligado até a instância
+// própria ser configurada (ver sendWhatsAppConfirmation).
+const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL || "";
+const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN || "";
 
 if (!WEBHOOK_SECRET) {
   console.error("WEBHOOK_SECRET não definido. Configure a variável de ambiente antes de iniciar.");
@@ -513,6 +522,43 @@ function normalizeBrPhone(raw) {
   return digits;
 }
 
+// Confirmação por WhatsApp quando ela termina o formulário de recrutamento —
+// manda os dados dela + o link de acesso ao painel. Isso é um ESQUELETO
+// genérico pra uma API própria de WhatsApp (formato comum em instâncias
+// self-hosted tipo Evolution API/Baileys: POST com o número e o texto,
+// token no header). Ajuste aqui — a URL/campos/header exatos — assim que
+// tiver os dados reais da instância; até lá, sem WHATSAPP_API_URL
+// configurado isso é só pulado, sem travar o cadastro dela.
+async function sendWhatsAppConfirmation({ phone, name, claimUrl }) {
+  if (!WHATSAPP_API_URL) return;
+
+  // `phone` aqui já vem sem o "55" (formato interno normalizado) — pra
+  // mandar de verdade pelo WhatsApp precisa do código do país de volta.
+  const fullPhone = phone.length <= 11 ? `55${phone}` : phone;
+  const firstName = String(name || "").trim().split(/\s+/)[0] || name || "";
+  const message =
+    `Oi ${firstName}! 🎉\n\n` +
+    `Recebemos sua avaliação com sucesso.\n\n` +
+    `Seu painel já está pronto — é só clicar no link abaixo pra entrar:\n${claimUrl}\n\n` +
+    `Esse link é de uso único e válido por 24h.`;
+
+  const res = await fetch(WHATSAPP_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(WHATSAPP_API_TOKEN
+        ? { Authorization: `Bearer ${WHATSAPP_API_TOKEN}`, apikey: WHATSAPP_API_TOKEN }
+        : {}),
+    },
+    // Manda o número/texto sob os dois nomes de campo mais comuns nesse
+    // tipo de API própria — troque pelo formato exato da sua instância.
+    body: JSON.stringify({ number: fullPhone, phone: fullPhone, text: message, message }),
+  });
+  if (!res.ok) {
+    throw new Error(`API de WhatsApp respondeu ${res.status}`);
+  }
+}
+
 // Gera 3 alternativas livres a partir do login que ela tentou, tipo
 // "lunahype12", "lunahype_47", "lunahype99" — só sugere o que não existe.
 function suggestUsernames(base) {
@@ -925,6 +971,21 @@ async function handleRequest(req, res) {
     const claimToken = randomBytes(32).toString("hex");
     const claimExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     insertClaimToken.run(claimToken, account.id, claimExpiresAt);
+
+    // Link separado só pra mandar por WhatsApp, com validade mais longa —
+    // o de cima é consumido na hora pelo próprio redirecionamento do
+    // formulário; se mandássemos o MESMO por WhatsApp, ela clicaria num
+    // link já usado (uso único) e cairia fora.
+    const whatsappClaimToken = randomBytes(32).toString("hex");
+    const whatsappClaimExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    insertClaimToken.run(whatsappClaimToken, account.id, whatsappClaimExpiresAt);
+    sendWhatsAppConfirmation({
+      phone: whatsappId,
+      name: nome,
+      claimUrl: `${PUBLIC_SITE_URL}/api/auth/claim?token=${whatsappClaimToken}`,
+    }).catch((err) => {
+      console.error("Falha ao mandar WhatsApp de confirmação:", err);
+    });
 
     res.writeHead(201);
     res.end(

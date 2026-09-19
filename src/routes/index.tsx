@@ -758,10 +758,13 @@ function Dashboard() {
             </button>
           </section>
 
-          {/* Botão de teste: só aparece pra quem está logada de verdade e não
-              tem leilão ativo agora — inicia um leilão fake com compradores
-              fictícios dando lance sozinhos. */}
-          {loggedIn && (!auction || auction.status === "ended") && (
+          {/* Botão de teste: fallback pra quando não existe leilão nenhum ainda
+              (conta antiga) ou o reinício automático falhou de verdade. Não
+              aparece só porque um leilão terminou — nesse caso o próximo já
+              está a caminho sozinho (ver efeito de auto-restart acima); mostrar
+              o botão nesse meio-tempo deixaria ela clicar e disputar corrida
+              com o reinício automático, gerando um erro de "já tem um ativo". */}
+          {loggedIn && (!auction || (auction.status !== "active" && fakeAuctionError)) && (
             <section className="rounded-3xl bg-card p-5 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-center justify-center gap-2 text-sm font-semibold">
                 <Gavel className="h-4 w-4 text-brand" /> Leilão de teste
