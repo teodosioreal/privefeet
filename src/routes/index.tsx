@@ -226,30 +226,6 @@ const DEFAULT_ACCOUNT: Account = {
   gorjetas: 70,
 };
 
-const VISITOR_ID_STORAGE_KEY = "privefeet_uid";
-
-// Identifica QUAL cliente está vendo a página, pra cada um enxergar só a
-// própria carteira. O "outro site" manda o cliente pra cá com o link
-// https://privefeet.pro/?u=<external_id>; aqui a gente lê isso uma vez e
-// guarda no navegador dela, pra continuar funcionando mesmo se ela navegar
-// pra /termos e voltar, ou fechar e abrir o site de novo sem o link.
-function resolveVisitorId(): string | null {
-  if (typeof window === "undefined") return null;
-  const fromUrl = new URLSearchParams(window.location.search).get("u");
-  if (fromUrl) {
-    try {
-      window.localStorage.setItem(VISITOR_ID_STORAGE_KEY, fromUrl);
-    } catch {
-      // localStorage indisponível (modo privado, navegador bloqueando etc.)
-    }
-    return fromUrl;
-  }
-  try {
-    return window.localStorage.getItem(VISITOR_ID_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
 
 function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -300,21 +276,18 @@ function Dashboard() {
   const [acceptingBidId, setAcceptingBidId] = useState<number | null>(null);
   const [saleNotice, setSaleNotice] = useState<{ bidderName: string; amount: number } | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  // Fluxo de teste: a usuária vê os lances recebidos no leilão atual e
-  // escolhe qual aceitar — não precisa ser o maior. Só nesse momento o
-  // valor entra na carteira dela.
+  // A usuária vê os lances recebidos no PRÓPRIO leilão e escolhe qual
+  // aceitar — não precisa ser o maior. Só nesse momento o valor entra na
+  // carteira dela. Sempre via sessão — o painel já exige login pra existir.
   const acceptBid = async (bidId: number) => {
-    // Se estiver logada (sessão via cookie), o backend usa a sessão e ignora
-    // o external_id abaixo. Sem sessão, cai no link de teste ?u=.
-    const uid = resolveVisitorId();
-    if (!loggedIn && !uid) return; // nem sessão, nem link — não tem carteira pra creditar
     setAcceptingBidId(bidId);
     try {
       const res = await fetch("/api/auction/accept-bid", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ external_id: uid, bid_id: bidId }),
+        body: JSON.stringify({ bid_id: bidId }),
       });
       const data = await res.json();
       if (res.ok && data.ok) {
@@ -376,25 +349,30 @@ function Dashboard() {
     }, 700);
   };
 
+  // Painel só existe pra quem está logada de verdade (sessão por cookie) —
+  // cada uma só enxerga a própria conta, sem conta "modelo" compartilhada
+  // pra quem chega sem cadastro. Confere a sessão primeiro; só busca a
+  // conta (e só então mostra a tela) depois de confirmar quem é ela.
   useEffect(() => {
     let cancelled = false;
-    const uid = resolveVisitorId();
-    const url = uid ? `/api/account?external_id=${encodeURIComponent(uid)}` : "/api/account";
-    fetch(url)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setAccount(data);
+    fetch("/api/auth/me")
+      .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+      .then(({ ok, data }) => {
+        if (cancelled) return;
+        setAuthChecked(true);
+        setLoggedIn(ok);
+        if (!ok) {
+          window.location.href = "/entrar";
+          return;
+        }
+        if (data.account) setAccount(data.account);
       })
       .catch(() => {
-        // API do webhook fora do ar por enquanto: mantém os valores padrão na tela.
+        if (!cancelled) {
+          setAuthChecked(true);
+          window.location.href = "/entrar";
+        }
       });
-    // Independente do link ?u=, confere se tem uma sessão de login de
-    // verdade (cookie) — só pra saber se mostra "Entrar" ou "Sair" no topo.
-    fetch("/api/auth/me")
-      .then((res) => {
-        if (!cancelled) setLoggedIn(res.ok);
-      })
-      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -475,6 +453,16 @@ function Dashboard() {
       feed.push({ key: "ranking", node: <RankingCard /> });
     }
   });
+
+  // Enquanto confere a sessão (ou se não está logada e já vai redirecionar
+  // pra /entrar), não mostra o painel — evita piscar dados de conta errada.
+  if (!authChecked || !loggedIn) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background text-foreground">
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">

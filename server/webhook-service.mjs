@@ -11,6 +11,7 @@
 //   POST /api/webhooks/auction       -> recebe eventos do servidor de leilão externo
 //   POST /api/auth/signup            -> cria conta (email, telefone, login, senha) e já loga
 //   POST /api/auth/login             -> autentica por login+senha
+//   POST /api/auth/login-lead        -> autentica quem veio do formulário (primeiro nome + telefone)
 //   GET  /api/auth/me                -> retorna a conta da sessão atual (cookie)
 //   POST /api/auth/logout            -> encerra a sessão
 //   POST /api/webhooks/lead          -> recebe o formulário de recrutamento externo,
@@ -244,6 +245,9 @@ const bumpCategoria = {
 
 const getAuctionByExternalId = db.prepare(`SELECT * FROM auctions WHERE external_id = ?`);
 const getLatestAuction = db.prepare(`SELECT * FROM auctions ORDER BY id DESC LIMIT 1`);
+const getLatestAuctionForAccount = db.prepare(
+  `SELECT * FROM auctions WHERE seller_account_id = ? ORDER BY id DESC LIMIT 1`,
+);
 const insertAuction = db.prepare(`
   INSERT INTO auctions (external_id, status, ends_at) VALUES (?, 'active', ?)
 `);
@@ -524,18 +528,16 @@ async function handleRequest(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/account") {
-    const requestedId = url.searchParams.get("external_id");
-    // Prioridade: ?external_id= explícito (link de teste) > sessão de login
-    // (cookie) > conta padrão do dono (preview quando não tem nada disso).
-    const sessionAccount = requestedId ? null : getSessionAccount(req);
-    const row = sessionAccount || getAccountByExternalId.get(requestedId || DEFAULT_EXTERNAL_ID);
-    if (!row) {
-      res.writeHead(404);
-      res.end(JSON.stringify({ ok: false, error: "conta não encontrada" }));
+    // Só por sessão de login de verdade — cada uma só enxerga a própria
+    // conta. Sem link de teste, sem conta "modelo" compartilhada.
+    const account = getSessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
       return;
     }
     res.writeHead(200);
-    res.end(JSON.stringify(toPublicAccount(row)));
+    res.end(JSON.stringify(toPublicAccount(account)));
     return;
   }
 
@@ -630,6 +632,44 @@ async function handleRequest(req, res) {
     }
     const valid = await verifyPassword(password, account.password_hash);
     if (!valid) {
+      genericError();
+      return;
+    }
+
+    await createSessionFor(res, account.id);
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, account: toPublicAccount(account) }));
+    return;
+  }
+
+  // Login de quem veio pelo formulário de recrutamento — essas contas nunca
+  // tiveram usuário/senha (entraram direto pelo link único). Confirma pelo
+  // primeiro nome + telefone que ela mesma cadastrou lá.
+  if (req.method === "POST" && url.pathname === "/api/auth/login-lead") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+      return;
+    }
+
+    const firstName = String(body.nome || "").trim().split(/\s+/)[0]?.toLowerCase();
+    const phone = digitsOnly(body.telefone);
+    const account = phone ? getAccountByPhone.get(phone) : null;
+
+    const genericError = () => {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "nome ou telefone não encontrados" }));
+    };
+
+    if (!account || !firstName) {
+      genericError();
+      return;
+    }
+    const accountFirstName = String(account.name || "").trim().split(/\s+/)[0]?.toLowerCase();
+    if (accountFirstName !== firstName) {
       genericError();
       return;
     }
@@ -882,7 +922,14 @@ async function handleRequest(req, res) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/auction/current") {
-    const row = getLatestAuction.get();
+    // Só o leilão da PRÓPRIA conta logada — nunca o de outra pessoa.
+    const account = getSessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
+      return;
+    }
+    const row = getLatestAuctionForAccount.get(account.id);
     if (!row) {
       res.writeHead(404);
       res.end(JSON.stringify({ ok: false, error: "nenhum leilão ainda" }));
@@ -992,10 +1039,10 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const existing = getLatestAuction.get();
+    const existing = getLatestAuctionForAccount.get(account.id);
     if (existing && existing.status === "active") {
       res.writeHead(409);
-      res.end(JSON.stringify({ ok: false, error: "já tem um leilão ativo agora" }));
+      res.end(JSON.stringify({ ok: false, error: "você já tem um leilão ativo agora" }));
       return;
     }
 
@@ -1012,11 +1059,16 @@ async function handleRequest(req, res) {
     return;
   }
 
-  // Fluxo de teste: a própria usuária escolhe, entre os lances recebidos, qual
-  // aceitar — só então o valor cai na carteira dela. Chamado pelo navegador
-  // dela mesma (não pelo servidor de leilão externo), por isso não exige o
-  // secret do webhook, só o external_id de quem está aceitando.
+  // A própria usuária escolhe, entre os lances recebidos no PRÓPRIO leilão,
+  // qual aceitar — só então o valor cai na carteira dela. Sempre por sessão.
   if (req.method === "POST" && url.pathname === "/api/auction/accept-bid") {
+    const account = getSessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
+      return;
+    }
+
     let body;
     try {
       body = await readJsonBody(req);
@@ -1026,24 +1078,14 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const { external_id, bid_id } = body;
+    const { bid_id } = body;
     if (typeof bid_id !== "number" || !Number.isInteger(bid_id)) {
       res.writeHead(400);
       res.end(JSON.stringify({ ok: false, error: "bid_id é obrigatório" }));
       return;
     }
 
-    // Sessão de login (cookie) é mais confiável que um external_id solto no
-    // corpo — qualquer um poderia forjar esse campo. Só cai pro external_id
-    // do corpo quando não tem sessão (fluxo de teste com link ?u=).
-    const sessionAccount = getSessionAccount(req);
-    if (!sessionAccount && (typeof external_id !== "string" || !external_id)) {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "external_id é obrigatório" }));
-      return;
-    }
-
-    const auction = getLatestAuction.get();
+    const auction = getLatestAuctionForAccount.get(account.id);
     if (!auction) {
       res.writeHead(404);
       res.end(JSON.stringify({ ok: false, error: "nenhum leilão ainda" }));
@@ -1058,22 +1100,6 @@ async function handleRequest(req, res) {
     if (!bid) {
       res.writeHead(404);
       res.end(JSON.stringify({ ok: false, error: "lance não encontrado nesse leilão" }));
-      return;
-    }
-
-    let account = sessionAccount;
-    if (!account) {
-      account = getAccountByExternalId.get(external_id);
-      if (!account) {
-        insertAccount.run(external_id, external_id, `@${external_id}`);
-        account = getAccountByExternalId.get(external_id);
-      }
-    }
-
-    // Leilão com dona definida (fluxo do leilão fake): só ela pode aceitar.
-    if (auction.seller_account_id != null && auction.seller_account_id !== account.id) {
-      res.writeHead(403);
-      res.end(JSON.stringify({ ok: false, error: "esse leilão não é seu" }));
       return;
     }
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Lock } from "lucide-react";
+import { ArrowLeft, Lock, UserRound } from "lucide-react";
 
 export const Route = createFileRoute("/entrar")({
   head: () => ({
@@ -11,12 +11,21 @@ export const Route = createFileRoute("/entrar")({
 
 function EntrarPage() {
   const navigate = useNavigate();
+  const [mode, setMode] = useState<"senha" | "formulario">("senha");
+
+  // Login e senha (quem criou conta em /cadastro)
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+
+  // Nome + telefone (quem veio pelo formulário de recrutamento — essas
+  // contas nunca tiveram usuário/senha, entraram direto pelo link único)
+  const [nome, setNome] = useState("");
+  const [telefone, setTelefone] = useState("");
+
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
+  const submitSenha = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
@@ -25,6 +34,29 @@ function EntrarPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        navigate({ to: "/" });
+        return;
+      }
+      setError(data.error || "Não deu pra entrar, tenta de novo.");
+    } catch {
+      setError("Sem conexão com o servidor. Tenta de novo em instantes.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitFormulario = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/login-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome, telefone }),
       });
       const data = await res.json();
       if (res.ok && data.ok) {
@@ -62,42 +94,113 @@ function EntrarPage() {
           </div>
         </div>
 
-        <form onSubmit={submit} className="mt-8 space-y-4">
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground">Login</label>
-            <input
-              type="text"
-              required
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="seu_login"
-              className="mt-1 w-full rounded-xl border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-brand"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-semibold text-muted-foreground">Senha</label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="mt-1 w-full rounded-xl border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-brand"
-            />
-          </div>
-
-          {error && <p className="text-sm text-red-500">{error}</p>}
-
+        <div className="mt-6 grid grid-cols-2 gap-2 rounded-xl bg-muted p-1">
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl py-3 text-sm font-bold text-brand-foreground disabled:opacity-60"
-            style={{ background: "var(--gradient-brand)" }}
+            type="button"
+            onClick={() => {
+              setMode("senha");
+              setError(null);
+            }}
+            className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
+              mode === "senha" ? "bg-card text-foreground shadow" : "text-muted-foreground"
+            }`}
           >
-            {loading ? "Entrando…" : "Entrar"}
+            Login e senha
           </button>
-        </form>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("formulario");
+              setError(null);
+            }}
+            className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
+              mode === "formulario" ? "bg-card text-foreground shadow" : "text-muted-foreground"
+            }`}
+          >
+            Vim pelo formulário
+          </button>
+        </div>
+
+        {mode === "senha" ? (
+          <form onSubmit={submitSenha} className="mt-6 space-y-4">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground">Login</label>
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="seu_login"
+                className="mt-1 w-full rounded-xl border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-brand"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground">Senha</label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="mt-1 w-full rounded-xl border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-brand"
+              />
+            </div>
+
+            {error && <p className="text-sm text-red-500">{error}</p>}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-xl py-3 text-sm font-bold text-brand-foreground disabled:opacity-60"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              {loading ? "Entrando…" : "Entrar"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={submitFormulario} className="mt-6 space-y-4">
+            <div className="flex items-start gap-2 rounded-xl bg-muted p-3 text-xs text-muted-foreground">
+              <UserRound className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>Use o primeiro nome e o telefone que você preencheu na avaliação.</p>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground">Primeiro nome</label>
+              <input
+                type="text"
+                required
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                placeholder="Maria"
+                className="mt-1 w-full rounded-xl border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-brand"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground">Telefone (com DDD)</label>
+              <input
+                type="tel"
+                required
+                value={telefone}
+                onChange={(e) => setTelefone(e.target.value)}
+                placeholder="(11) 91234-5678"
+                className="mt-1 w-full rounded-xl border border-border bg-card px-4 py-2.5 text-sm outline-none focus:border-brand"
+              />
+            </div>
+
+            {error && <p className="text-sm text-red-500">{error}</p>}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-xl py-3 text-sm font-bold text-brand-foreground disabled:opacity-60"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              {loading ? "Entrando…" : "Entrar"}
+            </button>
+          </form>
+        )}
 
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Ainda não tem conta?{" "}
