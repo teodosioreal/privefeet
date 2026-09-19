@@ -10,6 +10,7 @@ import {
   Gift,
   Heart,
   Home,
+  Lock,
   MessageCircle,
   MessageSquare,
   Search,
@@ -49,12 +50,12 @@ export const Route = createFileRoute("/")({
 
 const navItems = [
   { label: "Feed", icon: Home, active: true },
-  { label: "Explorar", icon: Compass },
+  { label: "Explorar", icon: Compass, locked: true },
   { label: "Assinaturas", icon: Star },
-  { label: "Mensagens", icon: MessageSquare, badge: "3" },
-  { label: "Salvos", icon: Bookmark },
-  { label: "Perfil", icon: User },
-  { label: "Configurações", icon: Settings },
+  { label: "Mensagens", icon: MessageSquare, badge: "1", locked: true },
+  { label: "Salvos", icon: Bookmark, locked: true },
+  { label: "Perfil", icon: User, locked: true },
+  { label: "Configurações", icon: Settings, locked: true },
 ];
 
 type Post = {
@@ -342,10 +343,13 @@ function Dashboard() {
               {navItems.map((item) => (
                 <button
                   key={item.label}
+                  onClick={item.locked ? () => setShowPlan(true) : undefined}
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
                     item.active
                       ? "bg-accent text-brand"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      : item.locked
+                        ? "text-muted-foreground/50 hover:bg-accent/50 hover:text-muted-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
                   }`}
                 >
                   <item.icon className="h-5 w-5 shrink-0" />
@@ -355,6 +359,7 @@ function Dashboard() {
                       {item.badge}
                     </span>
                   )}
+                  {item.locked && !item.badge && <Lock className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" />}
                 </button>
               ))}
             </nav>
