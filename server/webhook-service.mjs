@@ -4,11 +4,15 @@
 //
 // Endpoints:
 //   GET  /api/account?external_id=X  -> retorna a conta desse cliente (sem o
-//                                        parâmetro, retorna a conta padrão,
-//                                        dono do site — usada como preview)
+//                                        parâmetro, usa a sessão de login se
+//                                        houver; senão, a conta padrão do dono)
 //   POST /api/webhooks/wallet        -> recebe eventos e atualiza a carteira do cliente
 //   GET  /api/auction/current        -> retorna o leilão atual (status, prazo, lances)
 //   POST /api/webhooks/auction       -> recebe eventos do servidor de leilão externo
+//   POST /api/auth/signup            -> cria conta (email, telefone, login, senha) e já loga
+//   POST /api/auth/login             -> autentica por login+senha
+//   GET  /api/auth/me                -> retorna a conta da sessão atual (cookie)
+//   POST /api/auth/logout            -> encerra a sessão
 //
 // Variáveis de ambiente:
 //   PORT                    (padrão 3021)
@@ -22,6 +26,10 @@ import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { randomBytes, scrypt as scryptCb, timingSafeEqual as cryptoTimingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
+
+const scrypt = promisify(scryptCb);
 
 const PORT = Number(process.env.PORT || 3021);
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
@@ -97,6 +105,34 @@ if (!auctionColumns.some((c) => c.name === "accepted_bid_id")) {
   db.exec(`ALTER TABLE auctions ADD COLUMN accepted_bid_id INTEGER REFERENCES auction_bids(id)`);
 }
 
+// Migração: campos de login (email, telefone, usuário, senha) na tabela de
+// contas, que já existia antes deles.
+const accountColumns = db.prepare(`PRAGMA table_info(accounts)`).all();
+for (const [name, def] of [
+  ["email", "TEXT"],
+  ["phone", "TEXT"],
+  ["username", "TEXT"],
+  ["password_hash", "TEXT"],
+]) {
+  if (!accountColumns.some((c) => c.name === name)) {
+    db.exec(`ALTER TABLE accounts ADD COLUMN ${name} ${def}`);
+  }
+}
+// username precisa ser único, mas só entre quem tem um (contas antigas sem
+// login continuam existindo com username NULL, e SQLite permite múltiplos
+// NULL num índice único).
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username)`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT UNIQUE NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+  );
+`);
+
 // Conta padrão exibida no painel hoje (dono do site), seedada uma vez com
 // os valores que já estavam fixos na tela.
 const DEFAULT_EXTERNAL_ID = "owner";
@@ -111,6 +147,21 @@ const getAccountByExternalId = db.prepare(`SELECT * FROM accounts WHERE external
 const insertAccount = db.prepare(`
   INSERT INTO accounts (external_id, name, handle) VALUES (?, ?, ?)
 `);
+const getAccountByUsername = db.prepare(`SELECT * FROM accounts WHERE username = ?`);
+const getAccountById = db.prepare(`SELECT * FROM accounts WHERE id = ?`);
+const insertUserAccount = db.prepare(`
+  INSERT INTO accounts (external_id, name, handle, email, phone, username, password_hash)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+const insertSession = db.prepare(`
+  INSERT INTO sessions (token, account_id, expires_at) VALUES (?, ?, ?)
+`);
+const getSessionByToken = db.prepare(`
+  SELECT sessions.*, accounts.* FROM sessions
+  JOIN accounts ON accounts.id = sessions.account_id
+  WHERE token = ? AND expires_at > datetime('now')
+`);
+const deleteSession = db.prepare(`DELETE FROM sessions WHERE token = ?`);
 const insertEvent = db.prepare(`
   INSERT OR IGNORE INTO wallet_events (account_id, external_event_id, category, amount_centavos, raw_payload)
   VALUES (?, ?, ?, ?, ?)
@@ -207,13 +258,103 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
+// ===== Login/cadastro =====
+const SESSION_COOKIE = "privefeet_session";
+const SESSION_DAYS = 30;
+
+async function hashPassword(password) {
+  const salt = randomBytes(16).toString("hex");
+  const derived = await scrypt(password, salt, 64);
+  return `${salt}:${derived.toString("hex")}`;
+}
+
+async function verifyPassword(password, stored) {
+  const [salt, hex] = stored.split(":");
+  if (!salt || !hex) return false;
+  const derived = await scrypt(password, salt, 64);
+  const expected = Buffer.from(hex, "hex");
+  if (derived.length !== expected.length) return false;
+  return cryptoTimingSafeEqual(derived, expected);
+}
+
+function normalizeUsername(raw) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.]/g, "");
+}
+
+function digitsOnly(raw) {
+  return String(raw || "").replace(/\D/g, "");
+}
+
+// Gera 3 alternativas livres a partir do login que ela tentou, tipo
+// "lunahype12", "lunahype_47", "lunahype99" — só sugere o que não existe.
+function suggestUsernames(base) {
+  const suggestions = [];
+  let attempts = 0;
+  while (suggestions.length < 3 && attempts < 30) {
+    attempts += 1;
+    const n = Math.floor(Math.random() * 90) + 10; // 10–99
+    const candidate = `${base}${n}`;
+    if (!getAccountByUsername.get(candidate) && !suggestions.includes(candidate)) {
+      suggestions.push(candidate);
+    }
+  }
+  return suggestions;
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return out;
+}
+
+function setSessionCookie(res, token) {
+  const maxAge = SESSION_DAYS * 24 * 60 * 60;
+  res.setHeader(
+    "Set-Cookie",
+    `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`,
+  );
+}
+
+function clearSessionCookie(res) {
+  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+}
+
+async function createSessionFor(res, accountId) {
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  insertSession.run(token, accountId, expiresAt);
+  setSessionCookie(res, token);
+}
+
+// Conta da sessão atual, se o cookie for válido — usado tanto pra
+// /api/auth/me quanto como identidade "de verdade" (mais confiável que um
+// external_id solto no corpo da requisição) em ações que mexem em dinheiro.
+function getSessionAccount(req) {
+  const token = parseCookies(req)[SESSION_COOKIE];
+  if (!token) return null;
+  const row = getSessionByToken.get(token);
+  return row || null;
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   res.setHeader("content-type", "application/json; charset=utf-8");
 
   if (req.method === "GET" && url.pathname === "/api/account") {
     const requestedId = url.searchParams.get("external_id");
-    const row = getAccountByExternalId.get(requestedId || DEFAULT_EXTERNAL_ID);
+    // Prioridade: ?external_id= explícito (link de teste) > sessão de login
+    // (cookie) > conta padrão do dono (preview quando não tem nada disso).
+    const sessionAccount = requestedId ? null : getSessionAccount(req);
+    const row = sessionAccount || getAccountByExternalId.get(requestedId || DEFAULT_EXTERNAL_ID);
     if (!row) {
       res.writeHead(404);
       res.end(JSON.stringify({ ok: false, error: "conta não encontrada" }));
@@ -221,6 +362,128 @@ const server = createServer(async (req, res) => {
     }
     res.writeHead(200);
     res.end(JSON.stringify(toPublicAccount(row)));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/auth/signup") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+      return;
+    }
+
+    const email = String(body.email || "").trim().toLowerCase();
+    const phone = digitsOnly(body.phone);
+    const username = normalizeUsername(body.username);
+    const password = String(body.password || "");
+
+    if (!email || !email.includes("@")) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "e-mail inválido" }));
+      return;
+    }
+    if (phone.length < 10 || phone.length > 11) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "telefone inválido — inclua o DDD" }));
+      return;
+    }
+    if (username.length < 3) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "login precisa ter pelo menos 3 caracteres" }));
+      return;
+    }
+    if (password.length < 6) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "senha precisa ter pelo menos 6 caracteres" }));
+      return;
+    }
+
+    if (getAccountByUsername.get(username)) {
+      res.writeHead(409);
+      res.end(
+        JSON.stringify({
+          ok: false,
+          error: "username_taken",
+          suggestions: suggestUsernames(username),
+        }),
+      );
+      return;
+    }
+
+    const passwordHash = await hashPassword(password);
+    const info = insertUserAccount.run(
+      `user_${username}_${Date.now()}`, // external_id interno, só precisa ser único
+      username,
+      `@${username}`,
+      email,
+      phone,
+      username,
+      passwordHash,
+    );
+    const account = getAccountById.get(info.lastInsertRowid);
+    await createSessionFor(res, account.id);
+
+    res.writeHead(201);
+    res.end(JSON.stringify({ ok: true, account: toPublicAccount(account) }));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/auth/login") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+      return;
+    }
+
+    const username = normalizeUsername(body.username);
+    const password = String(body.password || "");
+    const account = username ? getAccountByUsername.get(username) : null;
+
+    const genericError = () => {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "login ou senha inválidos" }));
+    };
+
+    if (!account || !account.password_hash) {
+      genericError();
+      return;
+    }
+    const valid = await verifyPassword(password, account.password_hash);
+    if (!valid) {
+      genericError();
+      return;
+    }
+
+    await createSessionFor(res, account.id);
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, account: toPublicAccount(account) }));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/auth/me") {
+    const account = getSessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
+      return;
+    }
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, account: toPublicAccount(account) }));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/auth/logout") {
+    const token = parseCookies(req)[SESSION_COOKIE];
+    if (token) deleteSession.run(token);
+    clearSessionCookie(res);
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true }));
     return;
   }
 
@@ -409,14 +672,19 @@ const server = createServer(async (req, res) => {
     }
 
     const { external_id, bid_id } = body;
-    if (typeof external_id !== "string" || !external_id) {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "external_id é obrigatório" }));
-      return;
-    }
     if (typeof bid_id !== "number" || !Number.isInteger(bid_id)) {
       res.writeHead(400);
       res.end(JSON.stringify({ ok: false, error: "bid_id é obrigatório" }));
+      return;
+    }
+
+    // Sessão de login (cookie) é mais confiável que um external_id solto no
+    // corpo — qualquer um poderia forjar esse campo. Só cai pro external_id
+    // do corpo quando não tem sessão (fluxo de teste com link ?u=).
+    const sessionAccount = getSessionAccount(req);
+    if (!sessionAccount && (typeof external_id !== "string" || !external_id)) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "external_id é obrigatório" }));
       return;
     }
 
@@ -438,10 +706,13 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    let account = getAccountByExternalId.get(external_id);
+    let account = sessionAccount;
     if (!account) {
-      insertAccount.run(external_id, external_id, `@${external_id}`);
       account = getAccountByExternalId.get(external_id);
+      if (!account) {
+        insertAccount.run(external_id, external_id, `@${external_id}`);
+        account = getAccountByExternalId.get(external_id);
+      }
     }
 
     acceptBid.run(bid.id, bid.bidder_name, bid.amount_centavos, auction.id);
@@ -449,7 +720,7 @@ const server = createServer(async (req, res) => {
     bumpMes.run(bid.amount_centavos, account.id);
 
     const savedAuction = getAuctionByExternalId.get(auction.external_id);
-    const updatedAccount = getAccountByExternalId.get(external_id);
+    const updatedAccount = getAccountById.get(account.id);
     res.writeHead(200);
     res.end(
       JSON.stringify({ ok: true, auction: toPublicAuction(savedAuction), account: toPublicAccount(updatedAccount) }),

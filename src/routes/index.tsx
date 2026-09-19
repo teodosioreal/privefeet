@@ -297,13 +297,16 @@ function Dashboard() {
   const [feedOrder, setFeedOrder] = useState<Post[]>(posts);
   const [acceptingBidId, setAcceptingBidId] = useState<number | null>(null);
   const [saleNotice, setSaleNotice] = useState<{ bidderName: string; amount: number } | null>(null);
+  const [loggedIn, setLoggedIn] = useState(false);
 
   // Fluxo de teste: a usuária vê os lances recebidos no leilão atual e
   // escolhe qual aceitar — não precisa ser o maior. Só nesse momento o
   // valor entra na carteira dela.
   const acceptBid = async (bidId: number) => {
+    // Se estiver logada (sessão via cookie), o backend usa a sessão e ignora
+    // o external_id abaixo. Sem sessão, cai no link de teste ?u=.
     const uid = resolveVisitorId();
-    if (!uid) return; // sem link próprio (?u=), não tem carteira pra creditar
+    if (!loggedIn && !uid) return; // nem sessão, nem link — não tem carteira pra creditar
     setAcceptingBidId(bidId);
     try {
       const res = await fetch("/api/auction/accept-bid", {
@@ -359,10 +362,23 @@ function Dashboard() {
       .catch(() => {
         // API do webhook fora do ar por enquanto: mantém os valores padrão na tela.
       });
+    // Independente do link ?u=, confere se tem uma sessão de login de
+    // verdade (cookie) — só pra saber se mostra "Entrar" ou "Sair" no topo.
+    fetch("/api/auth/me")
+      .then((res) => {
+        if (!cancelled) setLoggedIn(res.ok);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const logout = () => {
+    fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+      window.location.href = "/";
+    });
+  };
 
   // Busca o leilão atual no servidor e continua checando periodicamente —
   // é assim que lances de gente real (mandados pelo servidor de leilão
@@ -533,6 +549,21 @@ function Dashboard() {
               />
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              {loggedIn ? (
+                <button
+                  onClick={logout}
+                  className="rounded-xl bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                  Sair
+                </button>
+              ) : (
+                <Link
+                  to="/entrar"
+                  className="rounded-xl bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                  Entrar
+                </Link>
+              )}
               <button className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-muted-foreground">
                 <Bell className="h-5 w-5" />
               </button>
