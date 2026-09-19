@@ -73,24 +73,24 @@ type Post = {
 const images = feedImages;
 
 const rawPosts: Array<Omit<Post, "image">> = [
-  { name: "Lia Moreira", handle: "@liamoreira", time: "há 4 min", tag: "Pets", text: "O Pipoca na luz da manhã ☀️🐱", price: "R$ 19,90", likes: "2.418", comments: "184" },
-  { name: "Rafael Costa", handle: "@rafacosta.photo", time: "há 12 min", tag: "Paisagem", text: "Amanhecer sobre o lago, 18 fotos novas.", price: "R$ 29,90", likes: "5.902", comments: "421" },
-  { name: "Bianca Rezende", handle: "@biancarez", time: "há 25 min", tag: "Pets", text: "Sessão de inverno com a Nina 🧶", price: "R$ 24,90", likes: "3.117", comments: "256" },
-  { name: "Estúdio Horizonte", handle: "@horizonte", time: "há 45 min", tag: "Aéreas", text: "Falésias ao pôr do sol + presets.", price: "R$ 39,90", likes: "8.340", comments: "612" },
-  { name: "Nuno Aguiar", handle: "@nunoaguiar", time: "há 1 h", tag: "Arquitetura", text: "Geometria de vidro no centro da cidade.", price: "R$ 35,00", likes: "1.902", comments: "97" },
-  { name: "Clara Vasques", handle: "@claravq", time: "há 1 h", tag: "Natureza", text: "Raios de sol na trilha da serra.", price: "R$ 22,50", likes: "4.221", comments: "310" },
-  { name: "Pedro Lemos", handle: "@pedrolemos", time: "há 2 h", tag: "Viagem", text: "Vielas coloridas com vista pro mar.", price: "R$ 49,90", likes: "6.780", comments: "524" },
-  { name: "Aline Duarte", handle: "@alineduarte", time: "há 2 h", tag: "Pets", text: "Filhote curioso no jardim 🌿", price: "R$ 18,00", likes: "9.110", comments: "703" },
-  { name: "Marcos Prado", handle: "@marcosprado", time: "há 3 h", tag: "Paisagem", text: "Névoa cobrindo o vale ao nascer do sol.", price: "R$ 27,90", likes: "2.980", comments: "142" },
-  { name: "Júlia Campos", handle: "@juliacampos", time: "há 4 h", tag: "Pets", text: "Retratos de estúdio com iluminação suave.", price: "R$ 31,00", likes: "3.640", comments: "221" },
-  { name: "Foto Aurora", handle: "@fotoaurora", time: "há 5 h", tag: "Viagem", text: "Ensaio de fim de tarde na costa.", price: "R$ 45,00", likes: "7.412", comments: "489" },
-  { name: "Diego Nunes", handle: "@diegonunes", time: "há 6 h", tag: "Arquitetura", text: "Linhas e sombras do novo museu.", price: "R$ 25,00", likes: "1.455", comments: "88" },
-  { name: "Sofia Mendes", handle: "@sofiamendes", time: "há 8 h", tag: "Natureza", text: "Floresta em silêncio depois da chuva.", price: "R$ 20,00", likes: "5.130", comments: "367" },
-  { name: "Caio Bertoldi", handle: "@caiobertoldi", time: "há 9 h", tag: "Pets", text: "Sessão especial: gatos e cobertores.", price: "R$ 28,90", likes: "4.008", comments: "295" },
-  { name: "Renata Lisboa", handle: "@renatalisboa", time: "há 11 h", tag: "Paisagem", text: "Ondas turquesa vistas do alto.", price: "R$ 52,00", likes: "10.240", comments: "914" },
-  { name: "Tiago Almeida", handle: "@tiagoalmeida", time: "há 13 h", tag: "Viagem", text: "Roteiro de 3 dias em fotos.", price: "R$ 33,50", likes: "2.211", comments: "154" },
-  { name: "Helena Braga", handle: "@helenabraga", time: "há 16 h", tag: "Pets", text: "Olhar azul da Lua 🐾", price: "R$ 21,90", likes: "6.045", comments: "412" },
-  { name: "Coletivo Norte", handle: "@coletivonorte", time: "há 20 h", tag: "Natureza", text: "Registro do amanhecer na montanha.", price: "R$ 37,00", likes: "3.874", comments: "268" },
+  { name: "Lunahype", handle: "@lunahype", time: "há 4 min", tag: "Pets", text: "O Pipoca na luz da manhã ☀️🐱", price: "R$ 19,90", likes: "2.418", comments: "184" },
+  { name: "Marcellyfans", handle: "@marcellyfans", time: "há 12 min", tag: "Paisagem", text: "Amanhecer sobre o lago, 18 fotos novas.", price: "R$ 29,90", likes: "5.902", comments: "421" },
+  { name: "Beladreams", handle: "@beladreams", time: "há 25 min", tag: "Pets", text: "Sessão de inverno com a Nina 🧶", price: "R$ 24,90", likes: "3.117", comments: "256" },
+  { name: "Jujubacore", handle: "@jujubacore", time: "há 45 min", tag: "Aéreas", text: "Falésias ao pôr do sol + presets.", price: "R$ 39,90", likes: "8.340", comments: "612" },
+  { name: "Anacrush", handle: "@anacrush", time: "há 1 h", tag: "Arquitetura", text: "Geometria de vidro no centro da cidade.", price: "R$ 35,00", likes: "1.902", comments: "97" },
+  { name: "Melzinhaofc", handle: "@melzinhaofc", time: "há 1 h", tag: "Natureza", text: "Raios de sol na trilha da serra.", price: "R$ 22,50", likes: "4.221", comments: "310" },
+  { name: "Claramood", handle: "@claramood", time: "há 2 h", tag: "Viagem", text: "Vielas coloridas com vista pro mar.", price: "R$ 49,90", likes: "6.780", comments: "524" },
+  { name: "Vickylovers", handle: "@vickylovers", time: "há 2 h", tag: "Pets", text: "Filhote curioso no jardim 🌿", price: "R$ 18,00", likes: "9.110", comments: "703" },
+  { name: "Manuforever", handle: "@manuforever", time: "há 3 h", tag: "Paisagem", text: "Névoa cobrindo o vale ao nascer do sol.", price: "R$ 27,90", likes: "2.980", comments: "142" },
+  { name: "Lalaflow", handle: "@lalaflow", time: "há 4 h", tag: "Pets", text: "Retratos de estúdio com iluminação suave.", price: "R$ 31,00", likes: "3.640", comments: "221" },
+  { name: "Dudaglow", handle: "@dudaglow", time: "há 5 h", tag: "Viagem", text: "Ensaio de fim de tarde na costa.", price: "R$ 45,00", likes: "7.412", comments: "489" },
+  { name: "Giovannavibes", handle: "@giovannavibes", time: "há 6 h", tag: "Arquitetura", text: "Linhas e sombras do novo museu.", price: "R$ 25,00", likes: "1.455", comments: "88" },
+  { name: "Majuverse", handle: "@majuverse", time: "há 8 h", tag: "Natureza", text: "Floresta em silêncio depois da chuva.", price: "R$ 20,00", likes: "5.130", comments: "367" },
+  { name: "Sofiacrush", handle: "@sofiacrush", time: "há 9 h", tag: "Pets", text: "Sessão especial: gatos e cobertores.", price: "R$ 28,90", likes: "4.008", comments: "295" },
+  { name: "Isaacore", handle: "@isaacore", time: "há 11 h", tag: "Paisagem", text: "Ondas turquesa vistas do alto.", price: "R$ 52,00", likes: "10.240", comments: "914" },
+  { name: "Biazone", handle: "@biazone", time: "há 13 h", tag: "Viagem", text: "Roteiro de 3 dias em fotos.", price: "R$ 33,50", likes: "2.211", comments: "154" },
+  { name: "Carolvibes", handle: "@carolvibes", time: "há 16 h", tag: "Pets", text: "Olhar azul da Lua 🐾", price: "R$ 21,90", likes: "6.045", comments: "412" },
+  { name: "Ninahouse", handle: "@ninahouse", time: "há 20 h", tag: "Natureza", text: "Registro do amanhecer na montanha.", price: "R$ 37,00", likes: "3.874", comments: "268" },
 ];
 
 const posts: Post[] = rawPosts.map((p, i) => ({ ...p, image: images[i % images.length]! }));
@@ -143,11 +143,11 @@ const banners = [
 ];
 
 const topCreators = [
-  { name: "Renata Lisboa", handle: "@renatalisboa", tag: "Paisagem", metric: "128k seguidores" },
-  { name: "Aline Duarte", handle: "@alineduarte", tag: "Pets", metric: "96k seguidores" },
-  { name: "Estúdio Horizonte", handle: "@horizonte", tag: "Aéreas", metric: "74k seguidores" },
-  { name: "Pedro Lemos", handle: "@pedrolemos", tag: "Viagem", metric: "51k seguidores" },
-  { name: "Clara Vasques", handle: "@claravq", tag: "Natureza", metric: "43k seguidores" },
+  { name: "Yasminmood", handle: "@yasminmood", tag: "Paisagem", metric: "128k seguidores" },
+  { name: "Emilywave", handle: "@emilywave", tag: "Pets", metric: "96k seguidores" },
+  { name: "Luizafans", handle: "@luizafans", tag: "Aéreas", metric: "74k seguidores" },
+  { name: "Heloisacore", handle: "@heloisacore", tag: "Viagem", metric: "51k seguidores" },
+  { name: "Amandaflow", handle: "@amandaflow", tag: "Natureza", metric: "43k seguidores" },
 ];
 
 // ===== Leilão (barra superior + popup de lances) =====
