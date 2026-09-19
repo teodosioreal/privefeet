@@ -158,6 +158,8 @@ for (const [name, def] of [
   ["password_hash", "TEXT"],
   ["avatar_path", "TEXT"],
   ["plan_active", "INTEGER NOT NULL DEFAULT 0"],
+  ["pix_full_name", "TEXT"],
+  ["pix_key", "TEXT"],
 ]) {
   if (!accountColumns.some((c) => c.name === name)) {
     db.exec(`ALTER TABLE accounts ADD COLUMN ${name} ${def}`);
@@ -284,6 +286,9 @@ const countAcceptedForAccount = db.prepare(
   `SELECT COUNT(*) AS n FROM auctions WHERE seller_account_id = ? AND accepted_bid_id IS NOT NULL`,
 );
 const activatePlan = db.prepare(`UPDATE accounts SET plan_active = 1, updated_at = datetime('now') WHERE id = ?`);
+const savePixInfo = db.prepare(
+  `UPDATE accounts SET pix_full_name = ?, pix_key = ?, updated_at = datetime('now') WHERE id = ?`,
+);
 const updateAuctionEndsAt = db.prepare(`UPDATE auctions SET ends_at = ?, updated_at = datetime('now') WHERE id = ?`);
 const endAuction = db.prepare(`
   UPDATE auctions SET status = 'ended', winner_name = ?, winner_amount_centavos = ?, updated_at = datetime('now') WHERE id = ?
@@ -350,6 +355,8 @@ function toPublicAccount(row) {
     // leilões seguintes continuam liberados de graça — só trava depois da
     // primeira aceita, pra ser justo com quem ainda não fechou negócio.
     hasAcceptedBid: countAcceptedForAccount.get(row.id).n > 0,
+    pixFullName: row.pix_full_name || null,
+    pixKey: row.pix_key || null,
     saldo: row.saldo_centavos / 100,
     esteMes: row.mes_centavos / 100,
     seguidores: row.seguidores,
@@ -902,6 +909,45 @@ async function handleRequest(req, res) {
       return;
     }
     activatePlan.run(account.id);
+    const updated = getAccountById.get(account.id);
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, account: toPublicAccount(updated) }));
+    return;
+  }
+
+  // Cadastra/atualiza a chave PIX pra receber os saques — nome completo
+  // (pode ser diferente do nome de exibição) + chave PIX.
+  if (req.method === "POST" && url.pathname === "/api/account/pix") {
+    const account = getSessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
+      return;
+    }
+
+    const fullName = String(body.fullName || "").trim();
+    const pixKey = String(body.pixKey || "").trim();
+    if (fullName.length < 3) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "nome completo é obrigatório" }));
+      return;
+    }
+    if (pixKey.length < 4) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "chave PIX é obrigatória" }));
+      return;
+    }
+
+    savePixInfo.run(fullName, pixKey, account.id);
     const updated = getAccountById.get(account.id);
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, account: toPublicAccount(updated) }));

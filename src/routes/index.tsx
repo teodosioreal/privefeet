@@ -670,12 +670,13 @@ function Dashboard() {
               ))}
             </nav>
 
-            <button
-              className="mt-6 w-full rounded-xl px-4 py-3 text-sm font-semibold text-brand-foreground"
+            <Link
+              to="/minha-conta"
+              className="mt-6 block w-full rounded-xl px-4 py-3 text-center text-sm font-semibold text-brand-foreground"
               style={{ background: "var(--gradient-brand)" }}
             >
-              Criar publicação
-            </button>
+              Minha conta
+            </Link>
           </div>
 
           <div className="flex items-center gap-3 rounded-2xl bg-muted p-3">
