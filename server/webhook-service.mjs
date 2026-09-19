@@ -23,7 +23,7 @@
 //                                        (o primeiro de cada conta já nasce sozinho no cadastro; os
 //                                        seguintes ficam girando sozinhos depois que um termina)
 //   POST /api/account/subscribe      -> ativa o plano (mock, sem pagamento de verdade ainda) —
-//                                        libera aceitar lance nos leilões depois do primeiro grátis
+//                                        libera aceitar lance de novo depois da primeira oferta aceita
 //
 // Variáveis de ambiente:
 //   PORT                    (padrão 3021)
@@ -138,9 +138,9 @@ if (!auctionColumns.some((c) => c.name === "accepted_bid_id")) {
 if (!auctionColumns.some((c) => c.name === "seller_account_id")) {
   db.exec(`ALTER TABLE auctions ADD COLUMN seller_account_id INTEGER REFERENCES accounts(id)`);
 }
-// O primeiro leilão de cada conta é sempre liberado de graça (nasce junto
-// com o cadastro); os leilões seguintes, que ficam girando sozinhos depois
-// disso, só podem ser aceitos por quem assinou o plano.
+// Coluna antiga (não é mais usada pra decidir o que é grátis — ver
+// countAcceptedForAccount mais abaixo — mas fica no schema por já existir
+// em bancos anteriores; sem custo mantê-la).
 if (!auctionColumns.some((c) => c.name === "is_free")) {
   db.exec(`ALTER TABLE auctions ADD COLUMN is_free INTEGER NOT NULL DEFAULT 0`);
 }
@@ -272,9 +272,14 @@ const insertAuction = db.prepare(`
   INSERT INTO auctions (external_id, status, ends_at) VALUES (?, 'active', ?)
 `);
 const insertFakeAuction = db.prepare(`
-  INSERT INTO auctions (external_id, status, ends_at, seller_account_id, is_free) VALUES (?, 'active', ?, ?, ?)
+  INSERT INTO auctions (external_id, status, ends_at, seller_account_id) VALUES (?, 'active', ?, ?)
 `);
-const countAuctionsForAccount = db.prepare(`SELECT COUNT(*) AS n FROM auctions WHERE seller_account_id = ?`);
+// Justo com ela: pode participar de quantos leilões quiser de graça
+// enquanto não aceitar nenhuma oferta. No instante em que aceita a
+// primeira, os leilões seguintes passam a exigir plano ativo.
+const countAcceptedForAccount = db.prepare(
+  `SELECT COUNT(*) AS n FROM auctions WHERE seller_account_id = ? AND accepted_bid_id IS NOT NULL`,
+);
 const activatePlan = db.prepare(`UPDATE accounts SET plan_active = 1, updated_at = datetime('now') WHERE id = ?`);
 const updateAuctionEndsAt = db.prepare(`UPDATE auctions SET ends_at = ?, updated_at = datetime('now') WHERE id = ?`);
 const endAuction = db.prepare(`
@@ -325,7 +330,6 @@ function toPublicAuction(row) {
     winnerName: row.winner_name,
     winnerAmount: row.winner_amount_centavos != null ? row.winner_amount_centavos / 100 : null,
     acceptedBidId: row.accepted_bid_id ?? null,
-    isFree: !!row.is_free,
     bids,
   };
 }
@@ -337,6 +341,10 @@ function toPublicAccount(row) {
     handle: row.handle,
     avatar: row.avatar_path ? `/api/leads/${row.avatar_path.split("/").pop()}` : null,
     planActive: !!row.plan_active,
+    // Já aceitou alguma oferta alguma vez? Enquanto não aceita nenhuma, os
+    // leilões seguintes continuam liberados de graça — só trava depois da
+    // primeira aceita, pra ser justo com quem ainda não fechou negócio.
+    hasAcceptedBid: countAcceptedForAccount.get(row.id).n > 0,
     saldo: row.saldo_centavos / 100,
     esteMes: row.mes_centavos / 100,
     seguidores: row.seguidores,
@@ -464,16 +472,14 @@ function scheduleFakeBids(auctionRowId, durationMs) {
 
 // Cria um leilão fake pra conta — usado tanto no primeiro leilão automático
 // (nasce junto com o cadastro, sem ela precisar clicar em nada) quanto nos
-// que ficam girando sozinhos depois. Só o primeiro de cada conta é grátis;
-// os seguintes exigem plano ativo na hora de ACEITAR um lance (o leilão em
-// si continua rodando pra todo mundo, só a aceitação é que é travada).
+// que ficam girando sozinhos depois. O leilão em si roda igual pra todo
+// mundo; quem trava é só a ACEITAÇÃO, e só depois que ela já aceitou uma
+// oferta antes (ver countAcceptedForAccount) e ainda não tem plano ativo.
 function createFakeAuctionForAccount(account) {
   const durationMs = 90 * 1000; // 90s — dá tempo de ver os lances chegando
   const externalId = `fake-${account.external_id}-${Date.now()}`;
   const endsAt = new Date(Date.now() + durationMs).toISOString();
-  const { n } = countAuctionsForAccount.get(account.id);
-  const isFree = n === 0 ? 1 : 0;
-  insertFakeAuction.run(externalId, endsAt, account.id, isFree);
+  insertFakeAuction.run(externalId, endsAt, account.id);
   const auctionRow = getAuctionByExternalId.get(externalId);
   scheduleFakeBids(auctionRow.id, durationMs);
   return auctionRow;
@@ -1253,10 +1259,12 @@ async function handleRequest(req, res) {
       res.end(JSON.stringify({ ok: false, error: "esse leilão já teve um lance aceito" }));
       return;
     }
-    // Só o primeiro leilão de cada conta é grátis. Os que ficam girando
-    // sozinhos depois disso continuam rolando lance normalmente — ela só
-    // não consegue ACEITAR nenhum deles até assinar o plano.
-    if (!auction.is_free && !account.plan_active) {
+    // Justo com ela: pode participar (e aceitar) de quantos leilões quiser
+    // de graça enquanto a carteira dela continuar vazia. No instante em que
+    // aceita a PRIMEIRA oferta, os leilões seguintes passam a exigir plano
+    // ativo pra aceitar outra.
+    const alreadyAcceptedBefore = countAcceptedForAccount.get(account.id).n > 0;
+    if (alreadyAcceptedBefore && !account.plan_active) {
       res.writeHead(403);
       res.end(
         JSON.stringify({ ok: false, error: "assine o plano pra participar desse leilão", requiresPlan: true }),

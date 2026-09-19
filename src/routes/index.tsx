@@ -174,7 +174,6 @@ type Auction = {
   winnerName: string | null;
   winnerAmount: number | null;
   acceptedBidId: number | null;
-  isFree: boolean;
   bids: AuctionBid[];
 };
 
@@ -211,6 +210,10 @@ type Account = {
   handle: string;
   avatar: string | null;
   planActive: boolean;
+  // Já aceitou alguma oferta de leilão alguma vez? Enquanto não aceita
+  // nenhuma, participa de quantos leilões quiser de graça — só trava depois
+  // da primeira oferta aceita, pra ser justo com quem ainda não fechou nada.
+  hasAcceptedBid: boolean;
   saldo: number;
   esteMes: number;
   seguidores: number;
@@ -225,6 +228,7 @@ const DEFAULT_ACCOUNT: Account = {
   handle: "@teodosio",
   avatar: null,
   planActive: false,
+  hasAcceptedBid: false,
   saldo: 75,
   esteMes: 1240,
   seguidores: 312,
@@ -289,10 +293,10 @@ function Dashboard() {
   // A usuária vê os lances recebidos no PRÓPRIO leilão e escolhe qual
   // aceitar — não precisa ser o maior. Só nesse momento o valor entra na
   // carteira dela. Sempre via sessão — o painel já exige login pra existir.
-  // Só o primeiro leilão (o que já nasce junto com o cadastro) é grátis; os
-  // que ficam girando sozinhos depois exigem plano ativo pra aceitar.
+  // Participa de quantos leilões quiser de graça enquanto não aceitar
+  // nenhuma oferta; só trava depois que já aceitou a primeira.
   const acceptBid = async (bidId: number) => {
-    if (auction && !auction.isFree && !account.planActive) {
+    if (account.hasAcceptedBid && !account.planActive) {
       setShowPlan(true);
       return;
     }
@@ -791,18 +795,18 @@ function Dashboard() {
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Gavel className="h-4 w-4 text-brand" /> Lances recebidos
               </div>
-              {auction.isFree || account.planActive ? (
+              {!account.hasAcceptedBid || account.planActive ? (
                 <p className="mt-1 text-xs text-muted-foreground">
                   Escolha qual lance você quer aceitar — o valor cai na sua carteira na hora.
                 </p>
               ) : (
                 <p className="mt-1 flex items-center gap-1.5 text-xs text-brand">
-                  <Lock className="h-3 w-3 shrink-0" /> Assine o plano pra aceitar lances a partir daqui.
+                  <Lock className="h-3 w-3 shrink-0" /> Assine o plano pra aceitar outra oferta.
                 </p>
               )}
               <ul className="mt-4 space-y-2">
                 {auction.bids.map((bid) => {
-                  const locked = !auction.isFree && !account.planActive;
+                  const locked = account.hasAcceptedBid && !account.planActive;
                   return (
                     <li
                       key={bid.id}
