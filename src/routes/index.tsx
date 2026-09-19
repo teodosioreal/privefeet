@@ -601,7 +601,11 @@ function Dashboard() {
           </div>
 
           <div className="flex items-center gap-3 rounded-2xl bg-muted p-3">
-            <Avatar name={account.name} photo={account.avatar ?? undefined} size="sm" />
+            {/* Sempre iniciais aqui — a foto que ela manda no formulário é
+                dos pés, não do rosto, e vira uma mancha sem forma nesse
+                ícone redondo pequeno. A foto continua guardada, só não é
+                usada como avatar. */}
+            <Avatar name={account.name} size="sm" />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{account.name}</p>
               <p className="truncate text-xs text-muted-foreground">{account.handle}</p>
@@ -641,7 +645,7 @@ function Dashboard() {
               <button className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-muted-foreground">
                 <Bell className="h-5 w-5" />
               </button>
-              <Avatar name={account.name} photo={account.avatar ?? undefined} size="sm" />
+              <Avatar name={account.name} size="sm" />
             </div>
           </header>
 
