@@ -731,7 +731,7 @@ function Dashboard() {
                 className="mt-4 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground disabled:opacity-60"
                 style={{ background: "var(--gradient-brand)" }}
               >
-                {startingFakeAuction ? "Iniciando…" : "Iniciar meu leilão de teste"}
+                {startingFakeAuction ? "Iniciando…" : "Prosseguir para a Plataforma"}
               </button>
               {fakeAuctionError && <p className="mt-2 text-xs text-red-500">{fakeAuctionError}</p>}
             </section>
