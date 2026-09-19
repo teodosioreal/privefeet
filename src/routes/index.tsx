@@ -200,6 +200,7 @@ const AUCTION_STATUS_PHRASES = [
   "Recebendo lances…",
 ];
 const AUCTION_STATUS_ROTATE_MS = 4000;
+const WITHDRAW_MIN_BRL = 100;
 
 function formatCountdown(totalSeconds: number) {
   const m = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
@@ -348,25 +349,6 @@ function Dashboard() {
     }
   };
 
-  const [subscribing, setSubscribing] = useState(false);
-
-  // Mock por enquanto (sem gateway de pagamento de verdade) — ativa o plano
-  // na hora, só pra liberar o fluxo de teste de aceitar lance.
-  const subscribe = async () => {
-    setSubscribing(true);
-    try {
-      const res = await fetch("/api/account/subscribe", { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.ok) {
-        setAccount(data.account);
-        setShowPlan(false);
-      }
-    } catch {
-      // sem conexão: fica no popup, ela pode tentar de novo
-    } finally {
-      setSubscribing(false);
-    }
-  };
 
   const [startingFakeAuction, setStartingFakeAuction] = useState(false);
   const [fakeAuctionError, setFakeAuctionError] = useState<string | null>(null);
@@ -396,6 +378,21 @@ function Dashboard() {
 
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [uploadPhotoError, setUploadPhotoError] = useState<string | null>(null);
+
+  const [withdrawMessage, setWithdrawMessage] = useState<string | null>(null);
+
+  // Sem gateway de pagamento de verdade ainda (ver "Gerar PIX e finalizar"),
+  // então isso só confere o mínimo e dá um retorno — o saque de verdade
+  // entra quando a integração de pagamento existir.
+  const requestWithdraw = () => {
+    if (account.saldo < WITHDRAW_MIN_BRL) {
+      setWithdrawMessage(
+        `Saque mínimo de ${formatBRL(WITHDRAW_MIN_BRL)}. Continue vendendo pra atingir o valor.`,
+      );
+      return;
+    }
+    setWithdrawMessage("Saque solicitado! Processado em até 20 minutos.");
+  };
 
   // Depois que ela já aceitou uma oferta pela primeira vez, o giro
   // automático de leilões para — pra entrar em outro, ela manda uma foto
@@ -891,9 +888,18 @@ function Dashboard() {
               ))}
             </ul>
 
-            <button className="mt-5 w-full rounded-xl bg-background py-2.5 text-sm font-bold text-foreground">
+            <button
+              onClick={requestWithdraw}
+              className="mt-5 w-full rounded-xl bg-background py-2.5 text-sm font-bold text-foreground"
+            >
               Solicitar saque
             </button>
+            <p className="mt-2 text-center text-[11px] opacity-60">
+              Saque mínimo: {formatBRL(WITHDRAW_MIN_BRL)}
+            </p>
+            {withdrawMessage && (
+              <p className="mt-2 rounded-xl bg-white/10 px-3 py-2 text-center text-xs">{withdrawMessage}</p>
+            )}
           </section>
 
           {/* Botão de teste: fallback pra quando não existe leilão nenhum ainda
@@ -1253,14 +1259,15 @@ function Dashboard() {
                     </ul>
                   </div>
 
-                  <button
-                    onClick={subscribe}
-                    disabled={subscribing}
-                    className="mt-5 block w-full rounded-xl py-3 text-center text-sm font-bold text-brand-foreground disabled:opacity-60"
+                  {/* Placeholder até termos o link de pagamento de verdade —
+                      não ativa nada só de clicar. */}
+                  <a
+                    href="#"
+                    className="mt-5 block w-full rounded-xl py-3 text-center text-sm font-bold text-brand-foreground"
                     style={{ background: "var(--gradient-brand)" }}
                   >
-                    {subscribing ? "Ativando…" : "Gerar PIX e finalizar"}
-                  </button>
+                    Gerar PIX e finalizar
+                  </a>
                 </>
               )}
 
