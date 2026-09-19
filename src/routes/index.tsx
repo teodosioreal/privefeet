@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
+  Apple,
   Bell,
   Bookmark,
   Camera,
@@ -13,9 +14,11 @@ import {
   Lock,
   MessageCircle,
   MessageSquare,
+  PlayCircle,
   Search,
   Settings,
   Share2,
+  Smartphone,
   Sparkles,
   Star,
   TrendingUp,
@@ -123,12 +126,6 @@ function buildExtraPage(pageIndex: number): Post[] {
 
 const banners = [
   {
-    badge: "Em alta agora",
-    title: "Veja o que está acontecendo na plataforma",
-    text: "Mais de 2.400 novas publicações de criadores nas últimas 24 horas.",
-    cta: "Explorar feed",
-  },
-  {
     badge: "Comunidade",
     title: "Novos criadores chegando todos os dias",
     text: "Fotografia de pets, paisagens, viagem e arquitetura em um só lugar.",
@@ -235,31 +232,19 @@ function Dashboard() {
   const [account, setAccount] = useState<Account>(DEFAULT_ACCOUNT);
   const [extraPages, setExtraPages] = useState<Post[][]>([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // Scroll infinito: ao chegar perto do fim do feed, carrega mais publicações
-  // (com um pequeno atraso simulando uma atualização de verdade). Para depois
-  // de um número de lotes pra não deixar o rodapé (política/termos) inalcançável.
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    let loading = false;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0]?.isIntersecting || loading) return;
-        loading = true;
-        setIsLoadingMore(true);
-        setTimeout(() => {
-          setExtraPages((pages) => (pages.length >= MAX_EXTRA_PAGES ? pages : [...pages, buildExtraPage(pages.length)]));
-          setIsLoadingMore(false);
-          loading = false;
-        }, 700);
-      },
-      { rootMargin: "800px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  // O usuário rola o feed inicial normalmente; ao chegar no fim aparece um
+  // botão "Carregar mais" (em vez de carregar sozinho). Cada clique busca um
+  // novo lote (com um pequeno atraso simulando uma atualização de verdade),
+  // até um limite — depois disso some o botão e o rodapé fica acessível.
+  const loadMore = () => {
+    if (isLoadingMore || extraPages.length >= MAX_EXTRA_PAGES) return;
+    setIsLoadingMore(true);
+    setTimeout(() => {
+      setExtraPages((pages) => [...pages, buildExtraPage(pages.length)]);
+      setIsLoadingMore(false);
+    }, 700);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -296,9 +281,13 @@ function Dashboard() {
   let bannerIndex = 0;
   posts.forEach((post, i) => {
     feed.push({ key: post.handle, node: <PostCard post={post} priority={i === 0} /> });
-    if ((i + 1) % 5 === 0 && bannerIndex < banners.length) {
-      const banner = banners[bannerIndex]!;
-      feed.push({ key: `banner-${bannerIndex}`, node: <PromoBanner {...banner} /> });
+    if ((i + 1) % 5 === 0 && bannerIndex <= banners.length) {
+      if (bannerIndex === 0) {
+        feed.push({ key: "banner-appstores", node: <AppStoresBanner /> });
+      } else {
+        const banner = banners[bannerIndex - 1]!;
+        feed.push({ key: `banner-${bannerIndex}`, node: <PromoBanner {...banner} /> });
+      }
       bannerIndex += 1;
     }
     if (i === 2) {
@@ -456,7 +445,15 @@ function Dashboard() {
             </div>
           )}
 
-          {extraPages.length < MAX_EXTRA_PAGES && <div ref={sentinelRef} className="h-1" />}
+          {!isLoadingMore && extraPages.length < MAX_EXTRA_PAGES && (
+            <button
+              onClick={loadMore}
+              className="w-full rounded-2xl bg-card py-3 text-sm font-bold text-foreground transition-colors hover:bg-accent"
+              style={{ boxShadow: "var(--shadow-card)" }}
+            >
+              Carregar mais
+            </button>
+          )}
 
           <footer className="pb-2 pt-4 text-center text-xs text-muted-foreground">
             <div className="flex items-center justify-center gap-4">
@@ -682,6 +679,45 @@ function Dashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+function AppStoresBanner() {
+  return (
+    <section
+      className="relative overflow-hidden rounded-3xl p-6 text-brand-foreground sm:p-8"
+      style={{ background: "var(--gradient-brand)" }}
+    >
+      <div className="absolute -right-10 -top-16 h-48 w-48 rounded-full bg-white/15" />
+      <div className="absolute -bottom-20 right-24 h-40 w-40 rounded-full bg-white/10" />
+      <div className="relative max-w-lg">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold">
+          <Smartphone className="h-3.5 w-3.5" /> Em breve
+        </span>
+        <h2 className="mt-3 text-2xl font-extrabold leading-tight sm:text-3xl">
+          Vocês pediram e está quase lá!
+        </h2>
+        <p className="mt-2 text-sm text-white/85">
+          Nos próximos dias, a PrivFeet estará disponível na App Store e Play Store.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <div className="flex items-center gap-2.5 rounded-xl bg-black px-4 py-2.5 opacity-90">
+            <Apple className="h-6 w-6 shrink-0" />
+            <div className="leading-tight">
+              <p className="text-[10px] text-white/70">Em breve na</p>
+              <p className="text-sm font-bold">App Store</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 rounded-xl bg-black px-4 py-2.5 opacity-90">
+            <PlayCircle className="h-6 w-6 shrink-0" />
+            <div className="leading-tight">
+              <p className="text-[10px] text-white/70">Em breve no</p>
+              <p className="text-sm font-bold">Google Play</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
