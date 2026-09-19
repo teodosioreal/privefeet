@@ -889,7 +889,18 @@ function RankingCard() {
             <span className="w-6 shrink-0 text-center text-sm font-extrabold text-muted-foreground">
               {i === 0 ? "🏆" : `#${i + 1}`}
             </span>
-            <Avatar name={c.name} photo={avatarImages[i % avatarImages.length]!} size="sm" />
+            <Avatar
+              name={c.name}
+              // Pega do fim do pool de avatares (em vez de começar do 0, como o
+              // feed) pra não duplicar visualmente com os primeiros posts do
+              // feed logo abaixo, que são os mais visíveis junto com este card.
+              photo={
+                avatarImages[
+                  (avatarImages.length - topCreators.length + i) % avatarImages.length
+                ]!
+              }
+              size="sm"
+            />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{c.handle}</p>
               <p className="truncate text-xs text-muted-foreground">
