@@ -152,11 +152,11 @@ const banners = [
 ];
 
 const topCreators = [
-  { name: "Yasminmood", handle: "@yasminmood", tag: "Paisagem", metric: "128k seguidores" },
-  { name: "Emilywave", handle: "@emilywave", tag: "Pets", metric: "96k seguidores" },
-  { name: "Luizafans", handle: "@luizafans", tag: "Aéreas", metric: "74k seguidores" },
-  { name: "Heloisacore", handle: "@heloisacore", tag: "Viagem", metric: "51k seguidores" },
-  { name: "Amandaflow", handle: "@amandaflow", tag: "Natureza", metric: "43k seguidores" },
+  { name: "Yasminmood", handle: "@yasminmood", vendas: 62, seguidores: 420, arrecadado: "R$ 6.056,72" },
+  { name: "Emilywave", handle: "@emilywave", vendas: 43, seguidores: 380, arrecadado: "R$ 5.688,82" },
+  { name: "Luizafans", handle: "@luizafans", vendas: 36, seguidores: 310, arrecadado: "R$ 4.720,32" },
+  { name: "Heloisacore", handle: "@heloisacore", vendas: 29, seguidores: 250, arrecadado: "R$ 3.760,05" },
+  { name: "Amandaflow", handle: "@amandaflow", vendas: 22, seguidores: 190, arrecadado: "R$ 2.880,00" },
 ];
 
 // ===== Leilão (barra superior + popup de lances) =====
@@ -786,18 +786,25 @@ function RankingCard() {
         </h3>
         <button className="shrink-0 text-xs font-semibold text-brand">Ver todos</button>
       </div>
+      <p className="mt-1 text-xs text-muted-foreground">Últimos 7 dias · Atualizado a cada 24h</p>
+
       <ul className="mt-4 divide-y divide-border">
         {topCreators.map((c, i) => (
-          <li key={c.handle} className="grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 py-3">
-            <span className="w-6 text-sm font-extrabold text-muted-foreground">#{i + 1}</span>
+          <li key={c.handle} className="flex items-center gap-3 py-3">
+            <span className="w-6 shrink-0 text-center text-sm font-extrabold text-muted-foreground">
+              {i === 0 ? "🏆" : `#${i + 1}`}
+            </span>
             <Avatar name={c.name} photo={avatarImages[i % avatarImages.length]!} size="sm" />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{c.name}</p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{c.handle}</p>
               <p className="truncate text-xs text-muted-foreground">
-                {c.handle} · {c.tag}
+                {c.vendas} vendas · {c.seguidores} seguidores
               </p>
             </div>
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">{c.metric}</span>
+            <div className="shrink-0 text-right">
+              <p className="text-sm font-bold">{c.arrecadado}</p>
+              <p className="text-[10px] text-muted-foreground">arrecadado</p>
+            </div>
           </li>
         ))}
       </ul>
