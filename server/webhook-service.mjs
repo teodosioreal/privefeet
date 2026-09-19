@@ -25,8 +25,10 @@
 //                                        primeira vez — depois disso, só reentra enviando foto nova)
 //   POST /api/account/upload-photo   -> depois que já aceitou uma oferta, é assim que ela entra em
 //                                        outro leilão: manda uma foto nova e um leilão novo já começa
+//                                        (exige plano ativo — só o primeiro leilão é grátis)
 //   POST /api/account/subscribe      -> ativa o plano (mock, sem pagamento de verdade ainda) —
-//                                        libera aceitar lance de novo depois da primeira oferta aceita
+//                                        libera enviar outra foto / aceitar lance de novo depois
+//                                        da primeira oferta aceita
 //
 // Variáveis de ambiente:
 //   PORT                    (padrão 3021)
@@ -1316,6 +1318,15 @@ async function handleRequest(req, res) {
     if (existing && existing.status === "active") {
       res.writeHead(409);
       res.end(JSON.stringify({ ok: false, error: "você já tem um leilão ativo agora" }));
+      return;
+    }
+    // Só o primeiro leilão é grátis. Pra mandar a segunda foto em diante
+    // (e assim entrar em outro leilão) ela precisa ter assinado o plano.
+    if (!account.plan_active) {
+      res.writeHead(403);
+      res.end(
+        JSON.stringify({ ok: false, error: "assine o plano pra enviar outra foto e entrar em outro leilão", requiresPlan: true }),
+      );
       return;
     }
 

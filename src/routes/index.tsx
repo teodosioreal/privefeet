@@ -401,6 +401,8 @@ function Dashboard() {
       if (res.ok && data.ok) {
         setAuction(data.auction);
         setAccount(data.account);
+      } else if (data.requiresPlan) {
+        setShowPlan(true);
       } else {
         setUploadPhotoError(data.error || "Não deu pra enviar a foto.");
       }
@@ -876,34 +878,52 @@ function Dashboard() {
             )}
 
           {/* Depois que ela já aceitou uma oferta pela primeira vez, o leilão
-              para de girar sozinho — só entra em outro enviando uma foto nova. */}
+              para de girar sozinho — só entra em outro enviando uma foto nova.
+              Só o primeiro leilão é grátis: enviar essa foto nova exige plano. */}
           {loggedIn && account.hasAcceptedBid && (!auction || auction.status === "ended") && (
             <section className="rounded-3xl bg-card p-5 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-center justify-center gap-2 text-sm font-semibold">
                 <Camera className="h-4 w-4 text-brand" /> Envie uma foto pra continuar
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Manda uma foto nova pra entrar em outro leilão e receber mais lances.
-              </p>
-              <label
-                className={`mt-4 block w-full cursor-pointer rounded-xl py-2.5 text-sm font-bold text-brand-foreground ${
-                  uploadingPhoto ? "opacity-60" : ""
-                }`}
-                style={{ background: "var(--gradient-brand)" }}
-              >
-                {uploadingPhoto ? "Enviando…" : "Enviar foto"}
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={uploadingPhoto}
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (file) uploadPhotoAndStartAuction(file);
-                  }}
-                />
-              </label>
+              {account.planActive ? (
+                <>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Manda uma foto nova pra entrar em outro leilão e receber mais lances.
+                  </p>
+                  <label
+                    className={`mt-4 block w-full cursor-pointer rounded-xl py-2.5 text-sm font-bold text-brand-foreground ${
+                      uploadingPhoto ? "opacity-60" : ""
+                    }`}
+                    style={{ background: "var(--gradient-brand)" }}
+                  >
+                    {uploadingPhoto ? "Enviando…" : "Enviar foto"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={uploadingPhoto}
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) uploadPhotoAndStartAuction(file);
+                      }}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <p className="mt-1 flex items-center justify-center gap-1.5 text-xs text-brand">
+                    <Lock className="h-3 w-3 shrink-0" /> Assine o plano pra enviar outra foto.
+                  </p>
+                  <button
+                    onClick={() => setShowPlan(true)}
+                    className="mt-4 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground"
+                    style={{ background: "var(--gradient-brand)" }}
+                  >
+                    Assinar plano
+                  </button>
+                </>
+              )}
               {uploadPhotoError && <p className="mt-2 text-xs text-red-500">{uploadPhotoError}</p>}
             </section>
           )}
