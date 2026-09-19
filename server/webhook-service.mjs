@@ -272,6 +272,21 @@ const acceptBid = db.prepare(`
   SET status = 'ended', accepted_bid_id = ?, winner_name = ?, winner_amount_centavos = ?, updated_at = datetime('now')
   WHERE id = ?
 `);
+const expireAuction = db.prepare(
+  `UPDATE auctions SET status = 'ended', updated_at = datetime('now') WHERE id = ? AND status = 'active'`,
+);
+
+// O leilão fake só vira "ended" no banco quando ela aceita um lance — se o
+// tempo esgota e ela não aceita nenhum, ele ficava "active" pra sempre, e o
+// botão de iniciar um novo nunca reaparecia. Isso aqui fecha ele sozinho
+// assim que o prazo (ends_at) já passou, sem vencedor.
+function withExpiry(row) {
+  if (row && row.status === "active" && new Date(row.ends_at).getTime() <= Date.now()) {
+    expireAuction.run(row.id);
+    return { ...row, status: "ended" };
+  }
+  return row;
+}
 
 function toPublicAuction(row) {
   if (!row) return null;
@@ -452,6 +467,19 @@ function digitsOnly(raw) {
   return String(raw || "").replace(/\D/g, "");
 }
 
+// Telefone sempre guardado/comparado como DDD + número (10-11 dígitos), sem
+// o "55" do Brasil na frente — é o formato que o cadastro normal usa. O
+// formulário de recrutamento manda o número JÁ com "55" grudado
+// (whatsappId), então sem isso a conta ficava salva com 12-13 dígitos e o
+// login por nome+telefone (que só pede DDD+número) nunca batia.
+function normalizeBrPhone(raw) {
+  const digits = digitsOnly(raw);
+  if (digits.length > 11 && digits.startsWith("55")) {
+    return digits.slice(2);
+  }
+  return digits;
+}
+
 // Gera 3 alternativas livres a partir do login que ela tentou, tipo
 // "lunahype12", "lunahype_47", "lunahype99" — só sugere o que não existe.
 function suggestUsernames(base) {
@@ -571,7 +599,7 @@ async function handleRequest(req, res) {
     }
 
     const email = String(body.email || "").trim().toLowerCase();
-    const phone = digitsOnly(body.phone);
+    const phone = normalizeBrPhone(body.phone);
     const username = normalizeUsername(body.username);
     const password = String(body.password || "");
 
@@ -675,7 +703,7 @@ async function handleRequest(req, res) {
     }
 
     const firstName = String(body.nome || "").trim().split(/\s+/)[0]?.toLowerCase();
-    const phone = digitsOnly(body.telefone);
+    const phone = normalizeBrPhone(body.telefone);
     const account = phone ? getAccountByPhone.get(phone) : null;
 
     const genericError = () => {
@@ -773,7 +801,7 @@ async function handleRequest(req, res) {
     }
 
     const nome = String(body.nome || "").trim();
-    const whatsappId = digitsOnly(body.whatsappId || body.whatsapp);
+    const whatsappId = normalizeBrPhone(body.whatsappId || body.whatsapp);
     const idade = Number.isFinite(body.idade) ? Math.round(body.idade) : null;
 
     if (!nome) {
@@ -948,7 +976,7 @@ async function handleRequest(req, res) {
       res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
       return;
     }
-    const row = getLatestAuctionForAccount.get(account.id);
+    const row = withExpiry(getLatestAuctionForAccount.get(account.id));
     if (!row) {
       res.writeHead(404);
       res.end(JSON.stringify({ ok: false, error: "nenhum leilão ainda" }));
@@ -1058,7 +1086,7 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const existing = getLatestAuctionForAccount.get(account.id);
+    const existing = withExpiry(getLatestAuctionForAccount.get(account.id));
     if (existing && existing.status === "active") {
       res.writeHead(409);
       res.end(JSON.stringify({ ok: false, error: "você já tem um leilão ativo agora" }));

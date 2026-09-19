@@ -32,8 +32,11 @@ export const ENVIAR_FOTO_NO_WEBHOOK = true;
 /** Tamanho máximo da foto enviada no webhook (em MB). Acima disso, a foto não vai. */
 export const LIMITE_FOTO_WEBHOOK_MB = 5;
 
-/** Quantos segundos esperar o webhook responder antes de seguir para o WhatsApp. */
-export const TEMPO_LIMITE_WEBHOOK_SEG = 8;
+/** Quantos segundos esperar o webhook responder antes de seguir para o WhatsApp.
+ *  Uma foto de até 5MB (limite acima) pode demorar bem mais que isso numa
+ *  conexão de celular mais lenta — se o tempo for curto demais aqui, o envio
+ *  é cancelado no meio e ela cai no WhatsApp mesmo com o servidor no ar. */
+export const TEMPO_LIMITE_WEBHOOK_SEG = 25;
 
 /** Links dos documentos legais. Deixe "" para exibir apenas o texto, sem link. */
 export const LINK_TERMOS = "";
