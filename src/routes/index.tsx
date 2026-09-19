@@ -280,6 +280,7 @@ function Dashboard() {
   const [acceptSecondsLeft, setAcceptSecondsLeft] = useState(0);
   const [showBids, setShowBids] = useState(false);
   const autoOpenedForRef = useRef<string | null>(null); // evita reabrir o popup pro mesmo leilão
+  const seenActiveRef = useRef<Set<string>>(new Set()); // leilões que ela viu ativos nesta sessão
   const autoRestartedForRef = useRef<string | null>(null); // evita reiniciar duas vezes o mesmo leilão encerrado
   const [showPlan, setShowPlan] = useState(false);
   const [planCycle, setPlanCycle] = useState<"mensal" | "anual">("anual");
@@ -371,6 +372,42 @@ function Dashboard() {
       setFakeAuctionError("Sem conexão com o servidor.");
     } finally {
       setStartingFakeAuction(false);
+    }
+  };
+
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadPhotoError, setUploadPhotoError] = useState<string | null>(null);
+
+  // Depois que ela já aceitou uma oferta pela primeira vez, o giro
+  // automático de leilões para — pra entrar em outro, ela manda uma foto
+  // nova aqui direto no painel (não precisa passar pelo formulário externo
+  // de novo).
+  const uploadPhotoAndStartAuction = async (file: File) => {
+    setUploadingPhoto(true);
+    setUploadPhotoError(null);
+    try {
+      const fotoBase64: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch("/api/account/upload-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fotoBase64 }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setAuction(data.auction);
+        setAccount(data.account);
+      } else {
+        setUploadPhotoError(data.error || "Não deu pra enviar a foto.");
+      }
+    } catch {
+      setUploadPhotoError("Sem conexão com o servidor.");
+    } finally {
+      setUploadingPhoto(false);
     }
   };
 
@@ -488,10 +525,25 @@ function Dashboard() {
     return () => clearInterval(t);
   }, [auction?.acceptDeadline, auction?.status, auction?.acceptedBidId]);
 
-  // Abre o popup de lances sozinho quando o leilão encerra — só uma vez por
-  // leilão, pra não reabrir toda vez que o usuário fechar e um novo poll chegar.
+  // Marca o leilão como "visto ativo" enquanto ela está de verdade
+  // acompanhando ele — é o que diferencia "ela estava no leilão" de só
+  // chegar na tela e encontrar um que já tinha acabado antes.
   useEffect(() => {
-    if (auction?.status === "ended" && autoOpenedForRef.current !== auction.externalId) {
+    if (auction?.status === "active") {
+      seenActiveRef.current.add(auction.externalId);
+    }
+  }, [auction?.externalId, auction?.status]);
+
+  // Abre o popup de lances sozinho quando o leilão encerra — só se ela
+  // estava mesmo acompanhando ele ativo (não abre pra um leilão que já
+  // tinha terminado antes dela chegar na tela). Só uma vez por leilão, pra
+  // não reabrir toda vez que o usuário fechar e um novo poll chegar.
+  useEffect(() => {
+    if (
+      auction?.status === "ended" &&
+      autoOpenedForRef.current !== auction.externalId &&
+      seenActiveRef.current.has(auction.externalId)
+    ) {
       setShowBids(true);
       autoOpenedForRef.current = auction.externalId;
     }
@@ -499,11 +551,14 @@ function Dashboard() {
 
   // "Outros leilões continuam acontecendo" — depois que um termina, o
   // próximo começa sozinho pouco depois, sem ela precisar clicar em nada.
+  // Só até ela aceitar uma oferta pela primeira vez: depois disso, o giro
+  // automático para, e ela só entra em outro leilão enviando uma foto nova
+  // (ver card "Envie uma foto pra continuar" mais abaixo).
   // Depende só do externalId/status (não do objeto `auction` inteiro, que
   // muda de referência a cada poll de 5s) — senão o efeito é desmontado e
   // remontado a cada poll, cancelando o setTimeout antes dele disparar.
   useEffect(() => {
-    if (auction?.status !== "ended") return;
+    if (auction?.status !== "ended" || account.hasAcceptedBid) return;
     const externalId = auction.externalId;
     if (autoRestartedForRef.current === externalId) return;
     autoRestartedForRef.current = externalId;
@@ -794,24 +849,61 @@ function Dashboard() {
               aparece só porque um leilão terminou — nesse caso o próximo já
               está a caminho sozinho (ver efeito de auto-restart acima); mostrar
               o botão nesse meio-tempo deixaria ela clicar e disputar corrida
-              com o reinício automático, gerando um erro de "já tem um ativo". */}
-          {loggedIn && (!auction || (auction.status !== "active" && fakeAuctionError)) && (
+              com o reinício automático, gerando um erro de "já tem um ativo".
+              Some de vez depois que ela já aceitou uma oferta — a partir daí
+              o card de baixo ("Envie uma foto pra continuar") toma o lugar. */}
+          {loggedIn &&
+            !account.hasAcceptedBid &&
+            (!auction || (auction.status !== "active" && fakeAuctionError)) && (
+              <section className="rounded-3xl bg-card p-5 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
+                <div className="flex items-center justify-center gap-2 text-sm font-semibold">
+                  <Gavel className="h-4 w-4 text-brand" /> Leilão de teste
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Inicia um leilão fake pra ver os lances chegando e testar o "Aceitar".
+                </p>
+                <button
+                  onClick={startFakeAuction}
+                  disabled={startingFakeAuction}
+                  className="mt-4 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground disabled:opacity-60"
+                  style={{ background: "var(--gradient-brand)" }}
+                >
+                  {startingFakeAuction ? "Iniciando…" : "Prosseguir para a Plataforma"}
+                </button>
+                {fakeAuctionError && <p className="mt-2 text-xs text-red-500">{fakeAuctionError}</p>}
+              </section>
+            )}
+
+          {/* Depois que ela já aceitou uma oferta pela primeira vez, o leilão
+              para de girar sozinho — só entra em outro enviando uma foto nova. */}
+          {loggedIn && account.hasAcceptedBid && (!auction || auction.status === "ended") && (
             <section className="rounded-3xl bg-card p-5 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-center justify-center gap-2 text-sm font-semibold">
-                <Gavel className="h-4 w-4 text-brand" /> Leilão de teste
+                <Camera className="h-4 w-4 text-brand" /> Envie uma foto pra continuar
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Inicia um leilão fake pra ver os lances chegando e testar o "Aceitar".
+                Manda uma foto nova pra entrar em outro leilão e receber mais lances.
               </p>
-              <button
-                onClick={startFakeAuction}
-                disabled={startingFakeAuction}
-                className="mt-4 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground disabled:opacity-60"
+              <label
+                className={`mt-4 block w-full cursor-pointer rounded-xl py-2.5 text-sm font-bold text-brand-foreground ${
+                  uploadingPhoto ? "opacity-60" : ""
+                }`}
                 style={{ background: "var(--gradient-brand)" }}
               >
-                {startingFakeAuction ? "Iniciando…" : "Prosseguir para a Plataforma"}
-              </button>
-              {fakeAuctionError && <p className="mt-2 text-xs text-red-500">{fakeAuctionError}</p>}
+                {uploadingPhoto ? "Enviando…" : "Enviar foto"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={uploadingPhoto}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) uploadPhotoAndStartAuction(file);
+                  }}
+                />
+              </label>
+              {uploadPhotoError && <p className="mt-2 text-xs text-red-500">{uploadPhotoError}</p>}
             </section>
           )}
 

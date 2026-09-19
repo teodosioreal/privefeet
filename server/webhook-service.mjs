@@ -20,8 +20,11 @@
 //   GET  /api/leads/:arquivo         -> serve a foto que ela mandou no formulário (avatar do perfil)
 //   POST /api/auction/start-fake     -> inicia um leilão de teste da usuária logada, com lances
 //                                        simulados de ~30 compradores fictícios chegando aos poucos
-//                                        (o primeiro de cada conta já nasce sozinho no cadastro; os
-//                                        seguintes ficam girando sozinhos depois que um termina)
+//                                        (o primeiro de cada conta já nasce sozinho no cadastro, e
+//                                        continua girando sozinho até ela aceitar uma oferta pela
+//                                        primeira vez — depois disso, só reentra enviando foto nova)
+//   POST /api/account/upload-photo   -> depois que já aceitou uma oferta, é assim que ela entra em
+//                                        outro leilão: manda uma foto nova e um leilão novo já começa
 //   POST /api/account/subscribe      -> ativa o plano (mock, sem pagamento de verdade ainda) —
 //                                        libera aceitar lance de novo depois da primeira oferta aceita
 //
@@ -482,7 +485,7 @@ const ACCEPT_DEADLINE_MS = 15 * 60 * 1000;
 // mundo; quem trava é só a ACEITAÇÃO, e só depois que ela já aceitou uma
 // oferta antes (ver countAcceptedForAccount) e ainda não tem plano ativo.
 function createFakeAuctionForAccount(account) {
-  const durationMs = 90 * 1000; // 90s — dá tempo de ver os lances chegando
+  const durationMs = 4.5 * 60 * 1000; // 4min30s por leilão
   const externalId = `fake-${account.external_id}-${Date.now()}`;
   const endsAt = new Date(Date.now() + durationMs).toISOString();
   insertFakeAuction.run(externalId, endsAt, account.id);
@@ -532,6 +535,26 @@ function normalizeBrPhone(raw) {
     return digits.slice(2);
   }
   return digits;
+}
+
+// Decodifica uma foto em base64 (data URL) e salva em disco — usado tanto
+// pelo formulário de recrutamento quanto pelo upload de foto nova direto
+// no painel. Retorna o caminho relativo salvo, ou null se não tinha foto
+// válida (nunca lança erro — quem chama decide o que fazer sem foto).
+function saveBase64Photo(dataUrl) {
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return null;
+  try {
+    const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!match) return null;
+    const ext = match[1].split("/")[1] || "jpg";
+    const dir = join(dirname(DB_PATH), "leads");
+    mkdirSync(dir, { recursive: true });
+    const filename = `${randomUUID()}.${ext}`;
+    writeFileSync(join(dir, filename), Buffer.from(match[2], "base64"));
+    return `leads/${filename}`;
+  } catch {
+    return null;
+  }
 }
 
 // Confirmação por WhatsApp quando ela termina o formulário de recrutamento —
@@ -946,24 +969,8 @@ async function handleRequest(req, res) {
       updateLeadAccountName.run(nome, account.id);
     }
 
-    // Foto (opcional): decodifica o base64 e salva em disco, do lado do
-    // nosso servidor — nunca fica só no navegador dela.
-    let fotoPath = null;
-    if (typeof body.fotoBase64 === "string" && body.fotoBase64.startsWith("data:")) {
-      try {
-        const match = body.fotoBase64.match(/^data:(image\/\w+);base64,(.+)$/);
-        if (match) {
-          const ext = match[1].split("/")[1] || "jpg";
-          const dir = join(dirname(DB_PATH), "leads");
-          mkdirSync(dir, { recursive: true });
-          const filename = `${randomUUID()}.${ext}`;
-          writeFileSync(join(dir, filename), Buffer.from(match[2], "base64"));
-          fotoPath = `leads/${filename}`;
-        }
-      } catch {
-        // segue sem a foto — não trava o cadastro por isso
-      }
-    }
+    // Foto (opcional) — nunca fica só no navegador dela.
+    const fotoPath = saveBase64Photo(body.fotoBase64);
 
     insertLeadSubmission.run(
       account.id,
@@ -1221,10 +1228,65 @@ async function handleRequest(req, res) {
       res.end(JSON.stringify({ ok: false, error: "você já tem um leilão ativo agora" }));
       return;
     }
+    // Depois que ela já aceitou uma oferta alguma vez, o leilão para de
+    // girar sozinho — só entra em outro enviando uma foto nova (endpoint
+    // /api/account/upload-photo). Fecha essa porta aqui também pra não dar
+    // pra pular a exigência chamando esse endpoint direto.
+    if (countAcceptedForAccount.get(account.id).n > 0) {
+      res.writeHead(403);
+      res.end(
+        JSON.stringify({ ok: false, error: "envie uma foto nova pra entrar em outro leilão", requiresPhoto: true }),
+      );
+      return;
+    }
 
     const auctionRow = createFakeAuctionForAccount(account);
     res.writeHead(201);
     res.end(JSON.stringify({ ok: true, auction: toPublicAuction(auctionRow) }));
+    return;
+  }
+
+  // Depois que ela já aceitou uma oferta alguma vez, é assim que ela entra
+  // em outro leilão: envia uma foto nova direto no painel (sem precisar
+  // passar pelo formulário externo de novo) e um leilão novo já começa.
+  if (req.method === "POST" && url.pathname === "/api/account/upload-photo") {
+    const account = getSessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
+      return;
+    }
+
+    const existing = withExpiry(getLatestAuctionForAccount.get(account.id));
+    if (existing && existing.status === "active") {
+      res.writeHead(409);
+      res.end(JSON.stringify({ ok: false, error: "você já tem um leilão ativo agora" }));
+      return;
+    }
+
+    const fotoPath = saveBase64Photo(body.fotoBase64);
+    if (!fotoPath) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "envie uma foto válida (JPG, PNG ou WEBP)" }));
+      return;
+    }
+    updateAccountAvatar.run(fotoPath, account.id);
+
+    const auctionRow = createFakeAuctionForAccount(account);
+    const updatedAccount = getAccountById.get(account.id);
+    res.writeHead(201);
+    res.end(
+      JSON.stringify({ ok: true, auction: toPublicAuction(auctionRow), account: toPublicAccount(updatedAccount) }),
+    );
     return;
   }
 
