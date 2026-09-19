@@ -19,7 +19,8 @@ dist-ssr
 # Regenerado automaticamente pelo build (vite/tanstack router codegen) —
 # rastrear isso no Git só causa conflito de merge no deploy da VPS
 # (o build de lá sempre deixa esse arquivo "sujo" antes do próximo git pull).
-src/routeTree.gen.ts
+# O ** cobre tanto o projeto principal quanto os subprojetos (ex: recrutamento/).
+**/src/routeTree.gen.ts
 
 # Wrangler / Cloudflare
 .wrangler/

@@ -13,6 +13,9 @@
 //   POST /api/auth/login             -> autentica por login+senha
 //   GET  /api/auth/me                -> retorna a conta da sessão atual (cookie)
 //   POST /api/auth/logout            -> encerra a sessão
+//   POST /api/webhooks/lead          -> recebe o formulário de recrutamento externo,
+//                                        cria/atualiza a conta e devolve um link de acesso único
+//   GET  /api/auth/claim?token=X     -> troca o link de uso único por uma sessão de verdade
 //
 // Variáveis de ambiente:
 //   PORT                    (padrão 3021)
@@ -20,13 +23,17 @@
 //                             no header X-Webhook-Secret em toda chamada ao webhook da carteira.
 //   AUCTION_WEBHOOK_SECRET   obrigatório — segredo separado pro servidor de leilão,
 //                             enviado no header X-Webhook-Secret nas chamadas a /api/webhooks/auction.
+//   LEAD_WEBHOOK_SECRET      opcional — segredo pro formulário de recrutamento externo,
+//                             enviado no header X-Webhook-Token nas chamadas a /api/webhooks/lead.
+//                             Se não definido, esse endpoint fica desativado (503), sem derrubar o resto.
+//   PUBLIC_SITE_URL          (padrão https://privefeet.pro) — usado pra montar o link de acesso único.
 //   DB_PATH                  (padrão ./data/privefeet.db)
 
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { randomBytes, scrypt as scryptCb, timingSafeEqual as cryptoTimingSafeEqual } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual as cryptoTimingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 
 const scrypt = promisify(scryptCb);
@@ -34,6 +41,11 @@ const scrypt = promisify(scryptCb);
 const PORT = Number(process.env.PORT || 3021);
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const AUCTION_WEBHOOK_SECRET = process.env.AUCTION_WEBHOOK_SECRET;
+// Opcional (diferente dos dois acima): se não for definido, o endpoint do
+// formulário de recrutamento só responde 503 — não derruba o resto do
+// serviço (carteira/leilão continuam funcionando normalmente).
+const LEAD_WEBHOOK_SECRET = process.env.LEAD_WEBHOOK_SECRET || "";
+const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://privefeet.pro";
 const DB_PATH = process.env.DB_PATH || "./data/privefeet.db";
 
 if (!WEBHOOK_SECRET) {
@@ -131,6 +143,30 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     expires_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS lead_submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    data_nascimento TEXT,
+    idade INTEGER,
+    genero TEXT,
+    respostas_json TEXT,
+    foto_path TEXT,
+    origem TEXT,
+    received_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Link de acesso único mandado pro formulário de recrutamento usar assim
+  -- que a pessoa termina de responder — troca por uma sessão de verdade e
+  -- se autodestrói (uso único, expira rápido).
+  CREATE TABLE IF NOT EXISTS claim_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT UNIQUE NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    used_at TEXT
+  );
 `);
 
 // Conta padrão exibida no painel hoje (dono do site), seedada uma vez com
@@ -162,6 +198,25 @@ const getSessionByToken = db.prepare(`
   WHERE token = ? AND expires_at > datetime('now')
 `);
 const deleteSession = db.prepare(`DELETE FROM sessions WHERE token = ?`);
+const getAccountByPhone = db.prepare(`SELECT * FROM accounts WHERE phone = ?`);
+const insertLeadAccount = db.prepare(`
+  INSERT INTO accounts (external_id, name, handle, phone) VALUES (?, ?, ?, ?)
+`);
+const updateLeadAccountName = db.prepare(`
+  UPDATE accounts SET name = ?, updated_at = datetime('now') WHERE id = ?
+`);
+const insertLeadSubmission = db.prepare(`
+  INSERT INTO lead_submissions
+    (account_id, data_nascimento, idade, genero, respostas_json, foto_path, origem)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+const insertClaimToken = db.prepare(`
+  INSERT INTO claim_tokens (token, account_id, expires_at) VALUES (?, ?, ?)
+`);
+const getClaimToken = db.prepare(`
+  SELECT * FROM claim_tokens WHERE token = ? AND used_at IS NULL AND expires_at > datetime('now')
+`);
+const markClaimTokenUsed = db.prepare(`UPDATE claim_tokens SET used_at = datetime('now') WHERE id = ?`);
 const insertEvent = db.prepare(`
   INSERT OR IGNORE INTO wallet_events (account_id, external_event_id, category, amount_centavos, raw_payload)
   VALUES (?, ?, ?, ?, ?)
@@ -346,8 +401,41 @@ function getSessionAccount(req) {
 }
 
 const server = createServer(async (req, res) => {
+  try {
+    await handleRequest(req, res);
+  } catch (err) {
+    // Uma exceção não tratada aqui derrubava o servidor inteiro (carteira +
+    // leilão + formulário juntos) por causa de UM request ruim. Agora só
+    // aquele request falha com 500 — o resto continua no ar.
+    console.error("Erro não tratado:", err);
+    if (!res.headersSent) {
+      res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: false, error: "internal_error" }));
+    } else {
+      res.end();
+    }
+  }
+});
+
+async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
   res.setHeader("content-type", "application/json; charset=utf-8");
+
+  // O formulário de recrutamento roda num domínio/porta diferente e chama
+  // /api/webhooks/lead direto do navegador dela — precisa de CORS liberado
+  // aqui (quem realmente protege esse endpoint é o X-Webhook-Token, não a
+  // origem). Os outros endpoints são chamados pelo próprio site ou
+  // servidor-a-servidor, não precisam disso.
+  if (url.pathname === "/api/webhooks/lead") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Webhook-Token");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+  }
 
   if (req.method === "GET" && url.pathname === "/api/account") {
     const requestedId = url.searchParams.get("external_id");
@@ -484,6 +572,124 @@ const server = createServer(async (req, res) => {
     clearSessionCookie(res);
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // Recebe as respostas do formulário de recrutamento (funil externo) e já
+  // cria/atualiza a conta dela — sem pedir e-mail/login/senha de novo. A
+  // resposta traz um link de uso único que loga ela direto no painel.
+  if (req.method === "POST" && url.pathname === "/api/webhooks/lead") {
+    if (!LEAD_WEBHOOK_SECRET) {
+      res.writeHead(503);
+      res.end(JSON.stringify({ ok: false, error: "endpoint não configurado" }));
+      return;
+    }
+    const providedToken = req.headers["x-webhook-token"];
+    if (typeof providedToken !== "string" || !timingSafeEqual(providedToken, LEAD_WEBHOOK_SECRET)) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "unauthorized" }));
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+      return;
+    }
+
+    const nome = String(body.nome || "").trim();
+    const whatsappId = digitsOnly(body.whatsappId || body.whatsapp);
+    const idade = Number.isFinite(body.idade) ? Math.round(body.idade) : null;
+
+    if (!nome) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "nome é obrigatório" }));
+      return;
+    }
+    if (whatsappId.length < 10 || whatsappId.length > 13) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "whatsappId inválido" }));
+      return;
+    }
+    if (idade != null && idade < 18) {
+      res.writeHead(403);
+      res.end(JSON.stringify({ ok: false, error: "menor de 18 anos" }));
+      return;
+    }
+
+    // Mesma pessoa mandando de novo (mesmo telefone) reaproveita a conta em
+    // vez de criar uma duplicada.
+    let account = getAccountByPhone.get(whatsappId);
+    if (!account) {
+      const handleBase = normalizeUsername(nome).slice(0, 20) || `lead${whatsappId.slice(-6)}`;
+      const externalId = `lead_${whatsappId}_${Date.now()}`;
+      insertLeadAccount.run(externalId, nome, `@${handleBase}`, whatsappId);
+      account = getAccountByPhone.get(whatsappId);
+    } else {
+      updateLeadAccountName.run(nome, account.id);
+    }
+
+    // Foto (opcional): decodifica o base64 e salva em disco, do lado do
+    // nosso servidor — nunca fica só no navegador dela.
+    let fotoPath = null;
+    if (typeof body.fotoBase64 === "string" && body.fotoBase64.startsWith("data:")) {
+      try {
+        const match = body.fotoBase64.match(/^data:(image\/\w+);base64,(.+)$/);
+        if (match) {
+          const ext = match[1].split("/")[1] || "jpg";
+          const dir = join(dirname(DB_PATH), "leads");
+          mkdirSync(dir, { recursive: true });
+          const filename = `${randomUUID()}.${ext}`;
+          writeFileSync(join(dir, filename), Buffer.from(match[2], "base64"));
+          fotoPath = `leads/${filename}`;
+        }
+      } catch {
+        // segue sem a foto — não trava o cadastro por isso
+      }
+    }
+
+    insertLeadSubmission.run(
+      account.id,
+      body.dataNascimento || null,
+      idade,
+      body.generoId || body.genero || null,
+      JSON.stringify(body.respostas || []),
+      fotoPath,
+      body.origem || null,
+    );
+
+    const claimToken = randomBytes(32).toString("hex");
+    const claimExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    insertClaimToken.run(claimToken, account.id, claimExpiresAt);
+
+    res.writeHead(201);
+    res.end(
+      JSON.stringify({
+        ok: true,
+        claimUrl: `${PUBLIC_SITE_URL}/api/auth/claim?token=${claimToken}`,
+      }),
+    );
+    return;
+  }
+
+  // Link de uso único: troca por uma sessão de verdade e manda ela pro
+  // painel já logada. É pra onde o formulário de recrutamento redireciona
+  // no lugar do link fixo, quando o webhook responde com sucesso.
+  if (req.method === "GET" && url.pathname === "/api/auth/claim") {
+    const token = url.searchParams.get("token") || "";
+    const row = token ? getClaimToken.get(token) : null;
+    if (!row) {
+      res.writeHead(302, { Location: "/entrar" });
+      res.end();
+      return;
+    }
+    markClaimTokenUsed.run(row.id);
+    await createSessionFor(res, row.account_id);
+    res.writeHead(302, { Location: "/" });
+    res.end();
     return;
   }
 
@@ -730,7 +936,7 @@ const server = createServer(async (req, res) => {
 
   res.writeHead(404);
   res.end(JSON.stringify({ ok: false, error: "not_found" }));
-});
+}
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`[privefeet-webhook] ouvindo em http://127.0.0.1:${PORT}`);
