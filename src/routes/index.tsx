@@ -140,6 +140,34 @@ function formatCountdown(totalSeconds: number) {
   return `${m}:${s}`;
 }
 
+// ===== Carteira (dados reais, atualizados por webhook) =====
+type Account = {
+  name: string;
+  handle: string;
+  saldo: number;
+  esteMes: number;
+  seguidores: number;
+  publicacoes: number;
+  colecoes: number;
+  gorjetas: number;
+};
+
+// Usado no primeiro render e como fallback se a API não responder.
+const DEFAULT_ACCOUNT: Account = {
+  name: "Teodosio Real",
+  handle: "@teodosio",
+  saldo: 75,
+  esteMes: 1240,
+  seguidores: 312,
+  publicacoes: 890,
+  colecoes: 280,
+  gorjetas: 70,
+};
+
+function formatBRL(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 const categories = [
   { label: "Gatinhos", posts: "12.4k posts" },
   { label: "Montanhas", posts: "9.1k posts" },
@@ -171,6 +199,22 @@ function Dashboard() {
   const [showBids, setShowBids] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [planCycle, setPlanCycle] = useState<"mensal" | "anual">("anual");
+  const [account, setAccount] = useState<Account>(DEFAULT_ACCOUNT);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/account")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setAccount(data);
+      })
+      .catch(() => {
+        // API do webhook fora do ar por enquanto: mantém os valores padrão na tela.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (secondsLeft <= 0) {
@@ -265,10 +309,10 @@ function Dashboard() {
           </div>
 
           <div className="flex items-center gap-3 rounded-2xl bg-muted p-3">
-            <Avatar name="Teodosio Real" size="sm" />
+            <Avatar name={account.name} size="sm" />
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">Teodosio Real</p>
-              <p className="truncate text-xs text-muted-foreground">@teodosio</p>
+              <p className="truncate text-sm font-semibold">{account.name}</p>
+              <p className="truncate text-xs text-muted-foreground">{account.handle}</p>
             </div>
           </div>
         </aside>
@@ -290,7 +334,7 @@ function Dashboard() {
               <button className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-muted-foreground">
                 <Bell className="h-5 w-5" />
               </button>
-              <Avatar name="Teodosio Real" size="sm" />
+              <Avatar name={account.name} size="sm" />
             </div>
           </header>
 
@@ -329,24 +373,24 @@ function Dashboard() {
               <Wallet className="h-4 w-4" /> Carteira
             </div>
             <p className="mt-4 text-xs opacity-60">Saldo disponível</p>
-            <p className="text-3xl font-extrabold tracking-tight">R$ 75,00</p>
+            <p className="text-3xl font-extrabold tracking-tight">{formatBRL(account.saldo)}</p>
 
             <div className="mt-5 grid grid-cols-2 gap-3">
               <div className="rounded-2xl bg-white/10 p-3">
                 <p className="text-xs opacity-60">Este mês</p>
-                <p className="text-sm font-bold">R$ 1.240,00</p>
+                <p className="text-sm font-bold">{formatBRL(account.esteMes)}</p>
               </div>
               <div className="rounded-2xl bg-white/10 p-3">
                 <p className="text-xs opacity-60">Seguidores</p>
-                <p className="text-sm font-bold">312</p>
+                <p className="text-sm font-bold">{account.seguidores}</p>
               </div>
             </div>
 
             <ul className="mt-5 space-y-2 text-sm">
               {[
-                ["Publicações", "R$ 890,00"],
-                ["Coleções", "R$ 280,00"],
-                ["Gorjetas", "R$ 70,00"],
+                ["Publicações", formatBRL(account.publicacoes)],
+                ["Coleções", formatBRL(account.colecoes)],
+                ["Gorjetas", formatBRL(account.gorjetas)],
               ].map(([label, value]) => (
                 <li key={label} className="flex items-center justify-between">
                   <span className="opacity-60">{label}</span>

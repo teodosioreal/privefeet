@@ -20,6 +20,12 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Dados reais dos clientes (banco do webhook) — nunca vai pro Git
+/data/
+*.db
+*.db-journal
+.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
