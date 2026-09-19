@@ -148,7 +148,12 @@ export async function enviarWebhook(dados: RespostasFunil) {
       headers,
       body: JSON.stringify(payload),
       signal: controller.signal,
-      keepalive: true,
+      // Sem keepalive: essa flag limita o corpo da requisição a 64 KB no
+      // Chromium, e uma foto real em base64 estoura isso fácil — o fetch
+      // falhava na hora, sem nem tentar, e caía no redirecionamento de
+      // fallback (WhatsApp) mesmo com o servidor funcionando perfeitamente.
+      // Não precisamos de keepalive aqui: a página espera a resposta antes
+      // de navegar, não é um "dispara e esquece" no fechamento da aba.
     });
     // Se o outro site já cria a conta na hora e manda de volta um link de
     // acesso (claimUrl), guardamos aqui — quem chamou decide se usa esse

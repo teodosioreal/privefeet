@@ -307,14 +307,31 @@ function toPublicAccount(row) {
   };
 }
 
+// Uma foto de verdade em base64 (o formulário de recrutamento aceita até
+// 5MB de foto) mais o resto do JSON facilmente passa de 1MB — o limite
+// antigo (1MB) destruía a conexão nesse caso sem responder nada, o que o
+// navegador só via como "Failed to fetch" (às vezes disfarçado de erro de
+// CORS). Damos folga suficiente pra essa foto e respondemos com um erro
+// de verdade (413) em vez de simplesmente derrubar a conexão.
+const MAX_BODY_BYTES = 10_000_000;
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
+    let tooLarge = false;
     req.on("data", (chunk) => {
+      if (tooLarge) return;
       raw += chunk;
-      if (raw.length > 1_000_000) req.destroy(); // limite de 1MB, evita payload abusivo
+      if (raw.length > MAX_BODY_BYTES) {
+        tooLarge = true;
+        const err = new Error("payload_too_large");
+        err.statusCode = 413;
+        reject(err);
+        req.destroy();
+      }
     });
     req.on("end", () => {
+      if (tooLarge) return;
       if (!raw) return resolve({});
       try {
         resolve(JSON.parse(raw));
@@ -322,7 +339,9 @@ function readJsonBody(req) {
         reject(new Error("invalid_json"));
       }
     });
-    req.on("error", reject);
+    req.on("error", (err) => {
+      if (!tooLarge) reject(err);
+    });
   });
 }
 
@@ -545,9 +564,9 @@ async function handleRequest(req, res) {
     let body;
     try {
       body = await readJsonBody(req);
-    } catch {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
       return;
     }
 
@@ -611,9 +630,9 @@ async function handleRequest(req, res) {
     let body;
     try {
       body = await readJsonBody(req);
-    } catch {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
       return;
     }
 
@@ -649,9 +668,9 @@ async function handleRequest(req, res) {
     let body;
     try {
       body = await readJsonBody(req);
-    } catch {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
       return;
     }
 
@@ -747,9 +766,9 @@ async function handleRequest(req, res) {
     let body;
     try {
       body = await readJsonBody(req);
-    } catch {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
       return;
     }
 
@@ -862,9 +881,9 @@ async function handleRequest(req, res) {
     let body;
     try {
       body = await readJsonBody(req);
-    } catch {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
       return;
     }
 
@@ -951,9 +970,9 @@ async function handleRequest(req, res) {
     let body;
     try {
       body = await readJsonBody(req);
-    } catch {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
       return;
     }
 
@@ -1072,9 +1091,9 @@ async function handleRequest(req, res) {
     let body;
     try {
       body = await readJsonBody(req);
-    } catch {
-      res.writeHead(400);
-      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+    } catch (err) {
+      res.writeHead(err?.statusCode === 413 ? 413 : 400);
+      res.end(JSON.stringify({ ok: false, error: err?.statusCode === 413 ? "payload_too_large" : "invalid_json" }));
       return;
     }
 
