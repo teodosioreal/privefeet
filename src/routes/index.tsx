@@ -185,6 +185,19 @@ const AUCTION_POLL_MS = 5000;
 const AUCTION_RESTART_DELAY_MS = [4000, 11000] as const;
 const FEED_REORDER_MS = 2 * 60 * 1000;
 
+// Frases que ficam alternando na barra do topo enquanto o leilão está
+// rodando — dá a sensação de que tem gente de verdade se movimentando ali,
+// tanto pra quem acabou de vir do formulário quanto pra qualquer leilão
+// ativo. Curtas de propósito, pra caber numa linha só no celular também.
+const AUCTION_STATUS_PHRASES = [
+  "Buscando compradores…",
+  "Aguardando compradores entrarem no leilão…",
+  "Divulgando seu leilão…",
+  "Compradores avaliando sua foto…",
+  "Recebendo lances…",
+];
+const AUCTION_STATUS_ROTATE_MS = 4000;
+
 function formatCountdown(totalSeconds: number) {
   const m = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
   const s = String(totalSeconds % 60).padStart(2, "0");
@@ -277,6 +290,7 @@ function Avatar({ name, photo, size = "md" }: { name: string; photo?: string; si
 function Dashboard() {
   const [auction, setAuction] = useState<Auction | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [statusPhraseIndex, setStatusPhraseIndex] = useState(0);
   const [acceptSecondsLeft, setAcceptSecondsLeft] = useState(0);
   const [showBids, setShowBids] = useState(false);
   const autoOpenedForRef = useRef<string | null>(null); // evita reabrir o popup pro mesmo leilão
@@ -510,6 +524,19 @@ function Dashboard() {
     return () => clearInterval(t);
   }, [auction?.endsAt, auction?.status]);
 
+  // Alterna as frases da barra do topo ("Buscando compradores…" etc.)
+  // enquanto o leilão está ativo — recomeça do zero a cada novo leilão.
+  useEffect(() => {
+    if (auction?.status !== "active") {
+      setStatusPhraseIndex(0);
+      return;
+    }
+    const t = setInterval(() => {
+      setStatusPhraseIndex((i) => (i + 1) % AUCTION_STATUS_PHRASES.length);
+    }, AUCTION_STATUS_ROTATE_MS);
+    return () => clearInterval(t);
+  }, [auction?.externalId, auction?.status]);
+
   // Depois que o leilão encerra, quanto tempo ainda falta pra ela poder
   // aceitar algum lance (janela de 15min a partir do fim — ver
   // ACCEPT_DEADLINE_MS no servidor). Some quando já foi aceito.
@@ -614,12 +641,14 @@ function Dashboard() {
         <div className="mx-auto flex max-w-[1400px] items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold">
           {auction?.status === "active" && (
             <>
-              <span className="relative flex h-2 w-2">
+              <span className="relative hidden h-2 w-2 shrink-0 sm:flex">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white/70" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
               </span>
-              <span>Próximo leilão em</span>
-              <span className="rounded-lg bg-white/20 px-2 py-0.5 text-base font-extrabold tabular-nums tracking-tight">
+              <span className="min-w-0 max-w-[55vw] truncate text-xs sm:max-w-none sm:text-sm">
+                {AUCTION_STATUS_PHRASES[statusPhraseIndex]}
+              </span>
+              <span className="shrink-0 rounded-lg bg-white/20 px-2 py-0.5 text-sm font-extrabold tabular-nums tracking-tight sm:text-base">
                 {formatCountdown(secondsLeft)}
               </span>
             </>
