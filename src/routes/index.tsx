@@ -166,6 +166,20 @@ function formatCountdown(totalSeconds: number) {
   return `${m}:${s}`;
 }
 
+// Cotação de mercado BRL -> AED (Dirham dos Emirados). Atualize esse valor
+// periodicamente para manter a conversão exibida no site próxima da real.
+const BRL_TO_AED_RATE = 0.7176;
+
+function parseBRL(priceLabel: string): number {
+  const digits = priceLabel.replace(/[^\d,]/g, "").replace(",", ".");
+  return Number(digits) || 0;
+}
+
+function formatAED(brlAmount: number): string {
+  const aed = brlAmount * BRL_TO_AED_RATE;
+  return aed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 // ===== Carteira (dados reais, atualizados por webhook) =====
 type Account = {
   name: string;
@@ -755,9 +769,11 @@ function PostCard({ post, priority }: { post: Post; priority?: boolean }) {
         />
         <div className="post-image-veil pointer-events-none absolute inset-0" />
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
-          <span className="rounded-2xl bg-white px-6 py-3 text-xl font-extrabold tracking-tight text-black shadow-[0_10px_30px_-10px_rgba(0,0,0,0.5)]">
-            {post.price}
-          </span>
+          <div className="rounded-2xl bg-white px-6 py-3 text-center shadow-[0_10px_30px_-10px_rgba(0,0,0,0.5)]">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-black/60">Vendido por</p>
+            <p className="text-xl font-extrabold tracking-tight text-black">{post.price}</p>
+            <p className="text-xs font-semibold text-black/50">≈ AED {formatAED(parseBRL(post.price))}</p>
+          </div>
         </div>
       </div>
 
