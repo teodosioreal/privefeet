@@ -618,7 +618,10 @@ function Dashboard() {
   const feed: Array<{ key: string; node: React.ReactNode }> = [];
   let bannerIndex = 0;
   feedOrder.forEach((post, i) => {
-    feed.push({ key: post.handle, node: <PostCard post={post} priority={i === 0} /> });
+    feed.push({
+      key: post.handle,
+      node: <PostCard post={post} priority={i === 0} onLockedClick={() => setShowPlan(true)} />,
+    });
     if ((i + 1) % 5 === 0 && bannerIndex <= banners.length) {
       if (bannerIndex === 0) {
         feed.push({ key: "banner-appstores", node: <AppStoresBanner /> });
@@ -805,7 +808,11 @@ function Dashboard() {
 
           {extraPages.map((page, pi) =>
             page.map((post, i) => (
-              <PostCard key={`extra-${pi}-${post.handle}-${i}`} post={post} />
+              <PostCard
+                key={`extra-${pi}-${post.handle}-${i}`}
+                post={post}
+                onLockedClick={() => setShowPlan(true)}
+              />
             )),
           )}
 
@@ -1484,7 +1491,28 @@ function RankingCard() {
   );
 }
 
-function PostCard({ post, priority }: { post: Post; priority?: boolean }) {
+// "2.418" -> 2418 e de volta, no formato PT-BR (ponto como separador de milhar).
+function parseLikeCount(formatted: string): number {
+  return Number(formatted.replace(/\./g, "")) || 0;
+}
+function formatLikeCount(n: number): string {
+  return n.toLocaleString("pt-BR");
+}
+
+function PostCard({
+  post,
+  priority,
+  onLockedClick,
+}: {
+  post: Post;
+  priority?: boolean;
+  onLockedClick: () => void;
+}) {
+  // Curtir é liberado pra todo mundo; comentar e mandar gorjeta são da
+  // parte paga do chat — clicar nesses abre a tela de assinar o plano.
+  const [liked, setLiked] = useState(false);
+  const displayLikes = formatLikeCount(parseLikeCount(post.likes) + (liked ? 1 : 0));
+
   return (
     <article className="overflow-hidden rounded-3xl bg-card" style={{ boxShadow: "var(--shadow-card)" }}>
       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 p-4">
@@ -1522,13 +1550,16 @@ function PostCard({ post, priority }: { post: Post; priority?: boolean }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-5 p-4 text-sm text-muted-foreground">
-        <button className="flex items-center gap-1.5 hover:text-brand-pink">
-          <Heart className="h-5 w-5" /> {post.likes}
+        <button
+          onClick={() => setLiked((v) => !v)}
+          className={`flex items-center gap-1.5 hover:text-brand-pink ${liked ? "text-brand-pink" : ""}`}
+        >
+          <Heart className={`h-5 w-5 ${liked ? "fill-current" : ""}`} /> {displayLikes}
         </button>
-        <button className="flex items-center gap-1.5 hover:text-foreground">
+        <button onClick={onLockedClick} className="flex items-center gap-1.5 hover:text-foreground">
           <MessageCircle className="h-5 w-5" /> {post.comments}
         </button>
-        <button className="flex items-center gap-1.5 hover:text-brand-orange">
+        <button onClick={onLockedClick} className="flex items-center gap-1.5 hover:text-brand-orange">
           <Gift className="h-5 w-5" /> Gorjeta
         </button>
         <button className="ml-auto flex items-center gap-1.5 hover:text-foreground">
