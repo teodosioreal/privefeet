@@ -79,24 +79,24 @@ type Post = {
 const images = feedImages;
 
 const rawPosts: Array<Omit<Post, "image" | "avatar">> = [
-  { name: "Lunahype", handle: "@lunahype", time: "há 4 min", tag: "Pets", text: "Pés de veludo", price: "R$ 38,21", likes: "2.418", comments: "184" },
-  { name: "Marcellyfans", handle: "@marcellyfans", time: "há 12 min", tag: "Paisagem", text: "Velvet steps", price: "R$ 57,41", likes: "5.902", comments: "421" },
-  { name: "Beladreams", handle: "@beladreams", time: "há 25 min", tag: "Pets", text: "Pasos de seda", price: "R$ 47,81", likes: "3.117", comments: "256" },
-  { name: "Jujubacore", handle: "@jujubacore", time: "há 45 min", tag: "Aéreas", text: "خطى الحرير", price: "R$ 76,61", likes: "8.340", comments: "612" },
-  { name: "Anacrush", handle: "@anacrush", time: "há 1 h", tag: "Arquitetura", text: "Toque suave", price: "R$ 67,20", likes: "1.902", comments: "97" },
-  { name: "Melzinhaofc", handle: "@melzinhaofc", time: "há 1 h", tag: "Natureza", text: "Soft touch", price: "R$ 43,20", likes: "4.221", comments: "310" },
-  { name: "Claramood", handle: "@claramood", time: "há 2 h", tag: "Viagem", text: "Encanto sutil", price: "R$ 95,81", likes: "6.780", comments: "524" },
-  { name: "Vickylovers", handle: "@vickylovers", time: "há 2 h", tag: "Pets", text: "سحر خفي", price: "R$ 34,56", likes: "9.110", comments: "703" },
-  { name: "Manuforever", handle: "@manuforever", time: "há 3 h", tag: "Paisagem", text: "Charme nos detalhes", price: "R$ 53,57", likes: "2.980", comments: "142" },
-  { name: "Lalaflow", handle: "@lalaflow", time: "há 4 h", tag: "Pets", text: "Barefoot dreams", price: "R$ 59,52", likes: "3.640", comments: "221" },
-  { name: "Dudaglow", handle: "@dudaglow", time: "há 5 h", tag: "Viagem", text: "Magia en cada paso", price: "R$ 86,40", likes: "7.412", comments: "489" },
-  { name: "Giovannavibes", handle: "@giovannavibes", time: "há 6 h", tag: "Arquitetura", text: "أنوثة ناعمة", price: "R$ 48,00", likes: "1.455", comments: "88" },
-  { name: "Majuverse", handle: "@majuverse", time: "há 8 h", tag: "Natureza", text: "Pés descalços, alma livre", price: "R$ 38,40", likes: "5.130", comments: "367" },
-  { name: "Sofiacrush", handle: "@sofiacrush", time: "há 9 h", tag: "Pets", text: "Serene beauty", price: "R$ 55,49", likes: "4.008", comments: "295" },
-  { name: "Isaacore", handle: "@isaacore", time: "há 11 h", tag: "Paisagem", text: "Belleza oculta", price: "R$ 99,84", likes: "10.240", comments: "914" },
-  { name: "Biazone", handle: "@biazone", time: "há 13 h", tag: "Viagem", text: "خطوات رقيقة", price: "R$ 64,32", likes: "2.211", comments: "154" },
-  { name: "Carolvibes", handle: "@carolvibes", time: "há 16 h", tag: "Pets", text: "Elegância natural", price: "R$ 42,05", likes: "6.045", comments: "412" },
-  { name: "Ninahouse", handle: "@ninahouse", time: "há 20 h", tag: "Natureza", text: "Gentle stride", price: "R$ 71,04", likes: "3.874", comments: "268" },
+  { name: "Lunahype", handle: "@lunahype", time: "há 4 min", tag: "Pets", text: "Pés de veludo", price: "R$ 43,94", likes: "2.418", comments: "184" },
+  { name: "Marcellyfans", handle: "@marcellyfans", time: "há 12 min", tag: "Paisagem", text: "Velvet steps", price: "R$ 66,02", likes: "5.902", comments: "421" },
+  { name: "Beladreams", handle: "@beladreams", time: "há 25 min", tag: "Pets", text: "Pasos de seda", price: "R$ 54,98", likes: "3.117", comments: "256" },
+  { name: "Jujubacore", handle: "@jujubacore", time: "há 45 min", tag: "Aéreas", text: "خطى الحرير", price: "R$ 88,10", likes: "8.340", comments: "612" },
+  { name: "Anacrush", handle: "@anacrush", time: "há 1 h", tag: "Arquitetura", text: "Toque suave", price: "R$ 77,28", likes: "1.902", comments: "97" },
+  { name: "Melzinhaofc", handle: "@melzinhaofc", time: "há 1 h", tag: "Natureza", text: "Soft touch", price: "R$ 49,68", likes: "4.221", comments: "310" },
+  { name: "Claramood", handle: "@claramood", time: "há 2 h", tag: "Viagem", text: "Encanto sutil", price: "R$ 110,18", likes: "6.780", comments: "524" },
+  { name: "Vickylovers", handle: "@vickylovers", time: "há 2 h", tag: "Pets", text: "سحر خفي", price: "R$ 39,74", likes: "9.110", comments: "703" },
+  { name: "Manuforever", handle: "@manuforever", time: "há 3 h", tag: "Paisagem", text: "Charme nos detalhes", price: "R$ 61,61", likes: "2.980", comments: "142" },
+  { name: "Lalaflow", handle: "@lalaflow", time: "há 4 h", tag: "Pets", text: "Barefoot dreams", price: "R$ 68,45", likes: "3.640", comments: "221" },
+  { name: "Dudaglow", handle: "@dudaglow", time: "há 5 h", tag: "Viagem", text: "Magia en cada paso", price: "R$ 99,36", likes: "7.412", comments: "489" },
+  { name: "Giovannavibes", handle: "@giovannavibes", time: "há 6 h", tag: "Arquitetura", text: "أنوثة ناعمة", price: "R$ 55,20", likes: "1.455", comments: "88" },
+  { name: "Majuverse", handle: "@majuverse", time: "há 8 h", tag: "Natureza", text: "Pés descalços, alma livre", price: "R$ 44,16", likes: "5.130", comments: "367" },
+  { name: "Sofiacrush", handle: "@sofiacrush", time: "há 9 h", tag: "Pets", text: "Serene beauty", price: "R$ 63,81", likes: "4.008", comments: "295" },
+  { name: "Isaacore", handle: "@isaacore", time: "há 11 h", tag: "Paisagem", text: "Belleza oculta", price: "R$ 114,82", likes: "10.240", comments: "914" },
+  { name: "Biazone", handle: "@biazone", time: "há 13 h", tag: "Viagem", text: "خطوات رقيقة", price: "R$ 73,97", likes: "2.211", comments: "154" },
+  { name: "Carolvibes", handle: "@carolvibes", time: "há 16 h", tag: "Pets", text: "Elegância natural", price: "R$ 48,36", likes: "6.045", comments: "412" },
+  { name: "Ninahouse", handle: "@ninahouse", time: "há 20 h", tag: "Natureza", text: "Gentle stride", price: "R$ 81,70", likes: "3.874", comments: "268" },
 ];
 
 const posts: Post[] = rawPosts.map((p, i) => ({
@@ -1454,7 +1454,7 @@ function RankingCard() {
         </h3>
         <button className="shrink-0 text-xs font-semibold text-brand">Ver todos</button>
       </div>
-      <p className="mt-1 text-xs text-muted-foreground">Últimos 7 dias · Atualizado a cada 24h</p>
+      <p className="mt-1 text-xs text-muted-foreground">Últimos 30 dias · Atualizado a cada 24h</p>
 
       <ul className="mt-4 divide-y divide-border">
         {topCreators.map((c, i) => (
