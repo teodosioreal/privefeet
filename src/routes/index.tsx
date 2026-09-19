@@ -329,6 +329,30 @@ function Dashboard() {
     }
   };
 
+  const [startingFakeAuction, setStartingFakeAuction] = useState(false);
+  const [fakeAuctionError, setFakeAuctionError] = useState<string | null>(null);
+
+  // Fluxo de teste: a usuária (logada de verdade, via cadastro/formulário)
+  // inicia o próprio leilão fake — compradores fictícios começam a dar
+  // lance sozinhos, pra ela testar a tela de aceitar lance.
+  const startFakeAuction = async () => {
+    setStartingFakeAuction(true);
+    setFakeAuctionError(null);
+    try {
+      const res = await fetch("/api/auction/start-fake", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setAuction(data.auction);
+      } else {
+        setFakeAuctionError(data.error || "Não deu pra iniciar o leilão.");
+      }
+    } catch {
+      setFakeAuctionError("Sem conexão com o servidor.");
+    } finally {
+      setStartingFakeAuction(false);
+    }
+  };
+
   // Embaralha a ordem dos posts iniciais a cada 2 minutos, pra quem fica com
   // a aba aberta não ver sempre a mesma sequência. As fotos/avatares
   // continuam grudados em cada criadora (só a ordem de exibição muda).
@@ -689,6 +713,29 @@ function Dashboard() {
               Solicitar saque
             </button>
           </section>
+
+          {/* Botão de teste: só aparece pra quem está logada de verdade e não
+              tem leilão ativo agora — inicia um leilão fake com compradores
+              fictícios dando lance sozinhos. */}
+          {loggedIn && (!auction || auction.status === "ended") && (
+            <section className="rounded-3xl bg-card p-5 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
+              <div className="flex items-center justify-center gap-2 text-sm font-semibold">
+                <Gavel className="h-4 w-4 text-brand" /> Leilão de teste
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Inicia um leilão fake pra ver os lances chegando e testar o "Aceitar".
+              </p>
+              <button
+                onClick={startFakeAuction}
+                disabled={startingFakeAuction}
+                className="mt-4 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground disabled:opacity-60"
+                style={{ background: "var(--gradient-brand)" }}
+              >
+                {startingFakeAuction ? "Iniciando…" : "Iniciar meu leilão de teste"}
+              </button>
+              {fakeAuctionError && <p className="mt-2 text-xs text-red-500">{fakeAuctionError}</p>}
+            </section>
+          )}
 
           {/* Lances recebidos no leilão atual — a usuária escolhe qual aceitar
               (não precisa ser o maior); só aí o valor entra na carteira dela. */}

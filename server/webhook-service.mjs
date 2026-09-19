@@ -17,6 +17,8 @@
 //                                        cria/atualiza a conta e devolve um link de acesso único
 //   GET  /api/auth/claim?token=X     -> troca o link de uso único por uma sessão de verdade
 //   GET  /api/leads/:arquivo         -> serve a foto que ela mandou no formulário (avatar do perfil)
+//   POST /api/auction/start-fake     -> inicia um leilão de teste da usuária logada, com lances
+//                                        simulados de ~30 compradores fictícios chegando aos poucos
 //
 // Variáveis de ambiente:
 //   PORT                    (padrão 3021)
@@ -116,6 +118,11 @@ db.exec(`
 const auctionColumns = db.prepare(`PRAGMA table_info(auctions)`).all();
 if (!auctionColumns.some((c) => c.name === "accepted_bid_id")) {
   db.exec(`ALTER TABLE auctions ADD COLUMN accepted_bid_id INTEGER REFERENCES auction_bids(id)`);
+}
+// Dona do leilão (pra fluxo de teste: cada usuária inicia o próprio leilão
+// fake a partir da conta dela, com lances simulados de compradores fictícios).
+if (!auctionColumns.some((c) => c.name === "seller_account_id")) {
+  db.exec(`ALTER TABLE auctions ADD COLUMN seller_account_id INTEGER REFERENCES accounts(id)`);
 }
 
 // Migração: campos de login (email, telefone, usuário, senha) na tabela de
@@ -240,6 +247,9 @@ const getLatestAuction = db.prepare(`SELECT * FROM auctions ORDER BY id DESC LIM
 const insertAuction = db.prepare(`
   INSERT INTO auctions (external_id, status, ends_at) VALUES (?, 'active', ?)
 `);
+const insertFakeAuction = db.prepare(`
+  INSERT INTO auctions (external_id, status, ends_at, seller_account_id) VALUES (?, 'active', ?, ?)
+`);
 const updateAuctionEndsAt = db.prepare(`UPDATE auctions SET ends_at = ?, updated_at = datetime('now') WHERE id = ?`);
 const endAuction = db.prepare(`
   UPDATE auctions SET status = 'ended', winner_name = ?, winner_amount_centavos = ?, updated_at = datetime('now') WHERE id = ?
@@ -317,6 +327,76 @@ function timingSafeEqual(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+// ===== Leilão fake (fluxo de teste) =====
+// Pool de compradores fictícios — cada leilão de teste sorteia um
+// subconjunto embaralhado desses 30, então nunca repete a mesma ordem.
+const FAKE_BIDDERS = [
+  { name: "Ahmed K.", flag: "🇦🇪" },
+  { name: "Layla M.", flag: "🇦🇪" },
+  { name: "James T.", flag: "🇬🇧" },
+  { name: "Sophie R.", flag: "🇬🇧" },
+  { name: "Marco B.", flag: "🇮🇹" },
+  { name: "Giulia F.", flag: "🇮🇹" },
+  { name: "Hans W.", flag: "🇩🇪" },
+  { name: "Lukas M.", flag: "🇩🇪" },
+  { name: "Pierre D.", flag: "🇫🇷" },
+  { name: "Camille L.", flag: "🇫🇷" },
+  { name: "Carlos R.", flag: "🇪🇸" },
+  { name: "Elena V.", flag: "🇪🇸" },
+  { name: "Ryan P.", flag: "🇺🇸" },
+  { name: "Ashley K.", flag: "🇺🇸" },
+  { name: "Liam O.", flag: "🇨🇦" },
+  { name: "Chloe B.", flag: "🇨🇦" },
+  { name: "Yuki T.", flag: "🇯🇵" },
+  { name: "Haruto S.", flag: "🇯🇵" },
+  { name: "Min-jun L.", flag: "🇰🇷" },
+  { name: "Ji-woo K.", flag: "🇰🇷" },
+  { name: "Lucas A.", flag: "🇧🇷" },
+  { name: "Rafael S.", flag: "🇧🇷" },
+  { name: "Diego F.", flag: "🇦🇷" },
+  { name: "Valentina G.", flag: "🇦🇷" },
+  { name: "Noah V.", flag: "🇳🇱" },
+  { name: "Emma D.", flag: "🇳🇱" },
+  { name: "Oscar L.", flag: "🇸🇪" },
+  { name: "Freja N.", flag: "🇸🇪" },
+  { name: "William H.", flag: "🇦🇺" },
+  { name: "Olivia C.", flag: "🇦🇺" },
+];
+
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Agenda de 6 a 10 lances chegando aos poucos (não tudo de uma vez), com
+// valor sempre subindo, pra parecer uma disputa real. Timers em memória —
+// se o processo reiniciar no meio, os lances restantes não chegam (ok pra
+// um fluxo de teste).
+function scheduleFakeBids(auctionRowId, durationMs) {
+  const count = 6 + Math.floor(Math.random() * 5); // 6–10 lances
+  const bidders = shuffleArray(FAKE_BIDDERS).slice(0, count);
+  let amountCentavos = (20 + Math.floor(Math.random() * 30)) * 100; // começa em R$20–50
+
+  bidders.forEach((bidder, i) => {
+    amountCentavos += (5 + Math.floor(Math.random() * 40)) * 100; // sobe R$5–45 a cada lance
+    const bidAmount = amountCentavos; // congela o valor DESSE lance — sem isso, todos os
+    // timers liam a mesma variável já no valor final quando disparassem.
+    // Espalha os lances nos primeiros 70% do tempo do leilão, em ordem.
+    const delay = Math.round(((i + 1) / (count + 1)) * durationMs * 0.7);
+    setTimeout(() => {
+      try {
+        insertBid.run(auctionRowId, `fake-${auctionRowId}-${i}-${randomUUID()}`, bidder.name, bidder.flag, bidAmount);
+      } catch {
+        // leilão pode já ter sido aceito/encerrado antes do timer disparar — ignora
+      }
+    }, delay);
+  });
 }
 
 // ===== Login/cadastro =====
@@ -901,6 +981,37 @@ async function handleRequest(req, res) {
     }
   }
 
+  // Fluxo de teste: a usuária inicia o próprio leilão fake a partir da
+  // conta dela (depois de anexar a foto no formulário), e um grupo de
+  // compradores fictícios começa a dar lance sozinho.
+  if (req.method === "POST" && url.pathname === "/api/auction/start-fake") {
+    const account = getSessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
+      return;
+    }
+
+    const existing = getLatestAuction.get();
+    if (existing && existing.status === "active") {
+      res.writeHead(409);
+      res.end(JSON.stringify({ ok: false, error: "já tem um leilão ativo agora" }));
+      return;
+    }
+
+    const durationMs = 90 * 1000; // 90s — dá tempo de ver os lances chegando
+    const externalId = `fake-${account.external_id}-${Date.now()}`;
+    const endsAt = new Date(Date.now() + durationMs).toISOString();
+    insertFakeAuction.run(externalId, endsAt, account.id);
+    const auctionRow = getAuctionByExternalId.get(externalId);
+
+    scheduleFakeBids(auctionRow.id, durationMs);
+
+    res.writeHead(201);
+    res.end(JSON.stringify({ ok: true, auction: toPublicAuction(auctionRow) }));
+    return;
+  }
+
   // Fluxo de teste: a própria usuária escolhe, entre os lances recebidos, qual
   // aceitar — só então o valor cai na carteira dela. Chamado pelo navegador
   // dela mesma (não pelo servidor de leilão externo), por isso não exige o
@@ -957,6 +1068,13 @@ async function handleRequest(req, res) {
         insertAccount.run(external_id, external_id, `@${external_id}`);
         account = getAccountByExternalId.get(external_id);
       }
+    }
+
+    // Leilão com dona definida (fluxo do leilão fake): só ela pode aceitar.
+    if (auction.seller_account_id != null && auction.seller_account_id !== account.id) {
+      res.writeHead(403);
+      res.end(JSON.stringify({ ok: false, error: "esse leilão não é seu" }));
+      return;
     }
 
     acceptBid.run(bid.id, bid.bidder_name, bid.amount_centavos, auction.id);
