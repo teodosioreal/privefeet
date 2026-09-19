@@ -173,6 +173,7 @@ type Auction = {
 };
 
 const AUCTION_POLL_MS = 5000;
+const FEED_REORDER_MS = 2 * 60 * 1000;
 
 function formatCountdown(totalSeconds: number) {
   const m = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
@@ -288,6 +289,17 @@ function Dashboard() {
   const [account, setAccount] = useState<Account>(DEFAULT_ACCOUNT);
   const [extraPages, setExtraPages] = useState<Post[][]>([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [feedOrder, setFeedOrder] = useState<Post[]>(posts);
+
+  // Embaralha a ordem dos posts iniciais a cada 2 minutos, pra quem fica com
+  // a aba aberta não ver sempre a mesma sequência. As fotos/avatares
+  // continuam grudados em cada criadora (só a ordem de exibição muda).
+  useEffect(() => {
+    const id = setInterval(() => {
+      setFeedOrder(shuffle(posts));
+    }, FEED_REORDER_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // O usuário rola o feed inicial normalmente; ao chegar no fim aparece um
   // botão "Carregar mais" (em vez de carregar sozinho). Cada clique busca um
@@ -373,7 +385,7 @@ function Dashboard() {
 
   const feed: Array<{ key: string; node: React.ReactNode }> = [];
   let bannerIndex = 0;
-  posts.forEach((post, i) => {
+  feedOrder.forEach((post, i) => {
     feed.push({ key: post.handle, node: <PostCard post={post} priority={i === 0} /> });
     if ((i + 1) % 5 === 0 && bannerIndex <= banners.length) {
       if (bannerIndex === 0) {
