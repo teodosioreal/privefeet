@@ -3,6 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   Bell,
   Bookmark,
+  Camera,
+  Check,
   Compass,
   Crown,
   Gift,
@@ -167,6 +169,8 @@ function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
 function Dashboard() {
   const [secondsLeft, setSecondsLeft] = useState(AUCTION_SECONDS);
   const [showBids, setShowBids] = useState(false);
+  const [showPlan, setShowPlan] = useState(false);
+  const [planCycle, setPlanCycle] = useState<"mensal" | "anual">("anual");
 
   useEffect(() => {
     if (secondsLeft <= 0) {
@@ -181,6 +185,8 @@ function Dashboard() {
     setShowBids(false);
     setSecondsLeft(AUCTION_SECONDS); // recomeça a contagem de 2 minutos
   };
+
+  const closePlan = () => setShowPlan(false);
 
   const feed: Array<{ key: string; node: React.ReactNode }> = [];
   let bannerIndex = 0;
@@ -287,6 +293,29 @@ function Dashboard() {
               <Avatar name="Teodosio Real" size="sm" />
             </div>
           </header>
+
+          <button
+            onClick={() => setShowPlan(true)}
+            className="flex w-full items-center justify-between gap-3 rounded-3xl p-5 text-left text-brand-foreground transition-transform hover:scale-[1.01]"
+            style={{ background: "var(--gradient-brand)", boxShadow: "var(--shadow-card)" }}
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white/20">
+                <Camera className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-base font-extrabold sm:text-lg">
+                  Envie mais uma foto e entre no leilão
+                </p>
+                <p className="mt-0.5 truncate text-sm text-white/85">
+                  Ative seu plano e concorra a lances em tempo real
+                </p>
+              </div>
+            </div>
+            <span className="shrink-0 rounded-xl bg-white px-4 py-2 text-sm font-bold text-brand">
+              Participar
+            </span>
+          </button>
 
           {feed.map((item) => (
             <div key={item.key}>{item.node}</div>
@@ -413,6 +442,102 @@ function Dashboard() {
               >
                 Fechar
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup — Escolha de plano (liberar leilões / saque) */}
+      {showPlan && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4 backdrop-blur-sm"
+          onClick={closePlan}
+        >
+          <div
+            className="w-full max-w-md overflow-hidden rounded-3xl bg-card"
+            style={{ boxShadow: "0 30px 80px -20px rgba(0,0,0,0.6)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="flex items-center justify-between p-5 text-brand-foreground"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-white/75">Antes de sacar...</p>
+                <h3 className="text-lg font-extrabold">Escolha seu plano</h3>
+              </div>
+              <button
+                onClick={closePlan}
+                aria-label="Fechar"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/20 transition-colors hover:bg-white/30"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5">
+              <p className="text-sm text-muted-foreground">Ative pra liberar leilões e sacar seus ganhos.</p>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-muted p-1">
+                <button
+                  onClick={() => setPlanCycle("mensal")}
+                  className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
+                    planCycle === "mensal" ? "bg-card text-foreground shadow" : "text-muted-foreground"
+                  }`}
+                >
+                  Mensal
+                </button>
+                <button
+                  onClick={() => setPlanCycle("anual")}
+                  className={`relative rounded-lg py-2 text-sm font-semibold transition-colors ${
+                    planCycle === "anual" ? "bg-card text-foreground shadow" : "text-muted-foreground"
+                  }`}
+                >
+                  Anual
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-foreground">
+                    Mais popular
+                  </span>
+                </button>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-border p-4">
+                <p className="text-sm font-bold">{planCycle === "anual" ? "Plano Anual" : "Plano Mensal"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {planCycle === "anual" ? "Pague 1 vez, use o ano todo" : "Renovação automática todo mês"}
+                </p>
+                <p className="mt-2 text-3xl font-extrabold tracking-tight">
+                  {planCycle === "anual" ? "R$ 59" : "R$ 39"}
+                  <span className="text-sm font-semibold text-muted-foreground">
+                    {planCycle === "anual" ? "/ano" : "/mês"}
+                  </span>
+                </p>
+
+                <ul className="mt-4 space-y-2 text-sm">
+                  {[
+                    "Saque PIX instantâneo 24h",
+                    "Leilões ilimitados",
+                    "Suporte prioritário 24/7",
+                    ...(planCycle === "anual" ? ["Economia de R$ 409 vs mensal"] : []),
+                  ].map((item) => (
+                    <li key={item} className="flex items-center gap-2">
+                      <Check className="h-4 w-4 shrink-0 text-brand" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <a
+                href="#"
+                className="mt-5 block rounded-xl py-3 text-center text-sm font-bold text-brand-foreground"
+                style={{ background: "var(--gradient-brand)" }}
+              >
+                Gerar PIX e finalizar
+              </a>
+
+              <p className="mt-3 text-center text-xs text-muted-foreground">
+                🛡️ Site protegido · Seus dados em segurança
+              </p>
             </div>
           </div>
         </div>
