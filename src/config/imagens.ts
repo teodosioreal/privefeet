@@ -34,6 +34,7 @@ export const feedImages: string[] = [
   "/images/post-21.jpg",
   "/images/post-22.jpg",
   "/images/post-23.jpg",
+  "/images/post-24.jpg",
 ];
 
 // ============================================================
@@ -57,4 +58,7 @@ export const avatarImages: string[] = [
   "/images/avatars/avatar-14.jpg",
   "/images/avatars/avatar-15.jpg",
   "/images/avatars/avatar-16.jpg",
+  "/images/avatars/avatar-18.jpg",
+  "/images/avatars/avatar-19.jpg",
+  "/images/avatars/avatar-20.jpg",
 ];
