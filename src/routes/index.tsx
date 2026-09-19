@@ -27,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 
-import { feedImages } from "@/config/imagens";
+import { avatarImages, feedImages } from "@/config/imagens";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -68,6 +68,7 @@ type Post = {
   tag: string;
   text: string;
   image: string;
+  avatar: string;
   price: string;
   likes: string;
   comments: string;
@@ -75,7 +76,7 @@ type Post = {
 
 const images = feedImages;
 
-const rawPosts: Array<Omit<Post, "image">> = [
+const rawPosts: Array<Omit<Post, "image" | "avatar">> = [
   { name: "Lunahype", handle: "@lunahype", time: "há 4 min", tag: "Pets", text: "O Pipoca na luz da manhã ☀️🐱", price: "R$ 19,90", likes: "2.418", comments: "184" },
   { name: "Marcellyfans", handle: "@marcellyfans", time: "há 12 min", tag: "Paisagem", text: "Amanhecer sobre o lago, 18 fotos novas.", price: "R$ 29,90", likes: "5.902", comments: "421" },
   { name: "Beladreams", handle: "@beladreams", time: "há 25 min", tag: "Pets", text: "Sessão de inverno com a Nina 🧶", price: "R$ 24,90", likes: "3.117", comments: "256" },
@@ -96,7 +97,11 @@ const rawPosts: Array<Omit<Post, "image">> = [
   { name: "Ninahouse", handle: "@ninahouse", time: "há 20 h", tag: "Natureza", text: "Registro do amanhecer na montanha.", price: "R$ 37,00", likes: "3.874", comments: "268" },
 ];
 
-const posts: Post[] = rawPosts.map((p, i) => ({ ...p, image: images[i % images.length]! }));
+const posts: Post[] = rawPosts.map((p, i) => ({
+  ...p,
+  image: images[i % images.length]!,
+  avatar: avatarImages[i % avatarImages.length]!,
+}));
 
 // ===== Scroll infinito: novas "páginas" de posts ao chegar perto do fim =====
 const FRESH_TIME_LABELS = [
@@ -120,6 +125,7 @@ function buildExtraPage(pageIndex: number): Post[] {
   return shuffle(rawPosts).map((p, i) => ({
     ...p,
     image: images[(pageIndex * 7 + i) % images.length]!,
+    avatar: avatarImages[(pageIndex * 3 + i) % avatarImages.length]!,
     time: FRESH_TIME_LABELS[i % FRESH_TIME_LABELS.length]!,
   }));
 }
@@ -206,14 +212,27 @@ function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
+function Avatar({ name, photo, size = "md" }: { name: string; photo?: string; size?: "sm" | "md" }) {
+  const dims = size === "sm" ? "h-9 w-9 text-xs" : "h-11 w-11 text-sm";
+
+  if (photo) {
+    return (
+      <img
+        src={photo}
+        alt={name}
+        width={44}
+        height={44}
+        className={`${dims} shrink-0 rounded-full object-cover`}
+      />
+    );
+  }
+
   const initials = name
     .split(" ")
     .slice(0, 2)
     .map((w) => w[0])
     .join("")
     .toUpperCase();
-  const dims = size === "sm" ? "h-9 w-9 text-xs" : "h-11 w-11 text-sm";
   return (
     <div
       className={`${dims} grid shrink-0 place-items-center rounded-full font-bold text-brand-foreground`}
@@ -765,7 +784,7 @@ function RankingCard() {
         {topCreators.map((c, i) => (
           <li key={c.handle} className="grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-3 py-3">
             <span className="w-6 text-sm font-extrabold text-muted-foreground">#{i + 1}</span>
-            <Avatar name={c.name} size="sm" />
+            <Avatar name={c.name} photo={avatarImages[i % avatarImages.length]!} size="sm" />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">{c.name}</p>
               <p className="truncate text-xs text-muted-foreground">
@@ -784,7 +803,7 @@ function PostCard({ post, priority }: { post: Post; priority?: boolean }) {
   return (
     <article className="overflow-hidden rounded-3xl bg-card" style={{ boxShadow: "var(--shadow-card)" }}>
       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 p-4">
-        <Avatar name={post.name} />
+        <Avatar name={post.name} photo={post.avatar} />
         <div className="min-w-0">
           <p className="truncate text-sm font-bold">{post.name}</p>
           <p className="truncate text-xs text-muted-foreground">

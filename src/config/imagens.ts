@@ -23,3 +23,14 @@ export const feedImages: string[] = [
   "/images/post-10.jpg",
   "/images/post-11.jpg",
 ];
+
+// ============================================================
+//  FOTOS DE PERFIL (avatares redondos de cada criador no feed)
+// ============================================================
+// Mesma lógica: coloque o arquivo em public/images/avatars/ e adicione aqui.
+export const avatarImages: string[] = [
+  "/images/avatars/avatar-1.jpg",
+  "/images/avatars/avatar-2.jpg",
+  "/images/avatars/avatar-3.jpg",
+  "/images/avatars/avatar-4.jpg",
+];
