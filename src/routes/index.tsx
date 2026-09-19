@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   Bell,
   Bookmark,
@@ -94,6 +94,32 @@ const rawPosts: Array<Omit<Post, "image">> = [
 
 const posts: Post[] = rawPosts.map((p, i) => ({ ...p, image: images[i % images.length]! }));
 
+// ===== Scroll infinito: novas "páginas" de posts ao chegar perto do fim =====
+const FRESH_TIME_LABELS = [
+  "agora mesmo", "há 1 min", "há 2 min", "há 4 min", "há 7 min", "há 9 min",
+  "há 12 min", "há 15 min", "há 18 min", "há 22 min", "há 26 min", "há 31 min",
+  "há 38 min", "há 44 min", "há 52 min", "há 1 h", "há 1 h 20", "há 1 h 40",
+];
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
+}
+
+const MAX_EXTRA_PAGES = 5; // depois disso, para de carregar e mostra o rodapé
+
+function buildExtraPage(pageIndex: number): Post[] {
+  return shuffle(rawPosts).map((p, i) => ({
+    ...p,
+    image: images[(pageIndex * 7 + i) % images.length]!,
+    time: FRESH_TIME_LABELS[i % FRESH_TIME_LABELS.length]!,
+  }));
+}
+
 const banners = [
   {
     badge: "Em alta agora",
@@ -168,14 +194,6 @@ function formatBRL(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-const categories = [
-  { label: "Gatinhos", posts: "12.4k posts" },
-  { label: "Montanhas", posts: "9.1k posts" },
-  { label: "Praias", posts: "7.8k posts" },
-  { label: "Arquitetura", posts: "5.5k posts" },
-  { label: "Auroras", posts: "3.2k posts" },
-];
-
 function Avatar({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
   const initials = name
     .split(" ")
@@ -200,6 +218,33 @@ function Dashboard() {
   const [showPlan, setShowPlan] = useState(false);
   const [planCycle, setPlanCycle] = useState<"mensal" | "anual">("anual");
   const [account, setAccount] = useState<Account>(DEFAULT_ACCOUNT);
+  const [extraPages, setExtraPages] = useState<Post[][]>([]);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll infinito: ao chegar perto do fim do feed, carrega mais publicações
+  // (com um pequeno atraso simulando uma atualização de verdade). Para depois
+  // de um número de lotes pra não deixar o rodapé (política/termos) inalcançável.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    let loading = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting || loading) return;
+        loading = true;
+        setIsLoadingMore(true);
+        setTimeout(() => {
+          setExtraPages((pages) => (pages.length >= MAX_EXTRA_PAGES ? pages : [...pages, buildExtraPage(pages.length)]));
+          setIsLoadingMore(false);
+          loading = false;
+        }, 700);
+      },
+      { rootMargin: "800px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -364,6 +409,49 @@ function Dashboard() {
           {feed.map((item) => (
             <div key={item.key}>{item.node}</div>
           ))}
+
+          {extraPages.map((page, pi) =>
+            page.map((post, i) => (
+              <PostCard key={`extra-${pi}-${post.handle}-${i}`} post={post} />
+            )),
+          )}
+
+          {isLoadingMore && (
+            <div className="space-y-5">
+              {[0, 1].map((i) => (
+                <div
+                  key={i}
+                  className="animate-pulse overflow-hidden rounded-3xl bg-card"
+                  style={{ boxShadow: "var(--shadow-card)" }}
+                >
+                  <div className="flex items-center gap-3 p-4">
+                    <div className="h-11 w-11 shrink-0 rounded-full bg-muted" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3 w-32 rounded bg-muted" />
+                      <div className="h-2 w-20 rounded bg-muted" />
+                    </div>
+                  </div>
+                  <div className="mx-4 mb-4 h-80 rounded-2xl bg-muted" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {extraPages.length < MAX_EXTRA_PAGES && <div ref={sentinelRef} className="h-1" />}
+
+          <footer className="pb-2 pt-4 text-center text-xs text-muted-foreground">
+            <div className="flex items-center justify-center gap-4">
+              <Link to="/privacidade" className="hover:text-foreground hover:underline">
+                Política de Privacidade
+              </Link>
+              <Link to="/termos" className="hover:text-foreground hover:underline">
+                Termos de Uso
+              </Link>
+            </div>
+            <p className="mt-2">
+              Última atualização: {new Date(__BUILD_TIME__).toLocaleString("pt-BR")}
+            </p>
+          </footer>
         </main>
 
         {/* Right sidebar */}
@@ -402,18 +490,6 @@ function Dashboard() {
             <button className="mt-5 w-full rounded-xl bg-background py-2.5 text-sm font-bold text-foreground">
               Solicitar saque
             </button>
-          </section>
-
-          <section className="rounded-3xl bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
-            <h3 className="text-base font-bold">Categorias em alta</h3>
-            <ul className="mt-3 space-y-3">
-              {categories.map((c) => (
-                <li key={c.label} className="flex items-center justify-between">
-                  <span className="text-sm font-medium">#{c.label}</span>
-                  <span className="text-xs text-muted-foreground">{c.posts}</span>
-                </li>
-              ))}
-            </ul>
           </section>
 
           <section className="rounded-3xl p-5 text-brand-foreground" style={{ background: "var(--gradient-brand)" }}>

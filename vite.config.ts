@@ -17,4 +17,10 @@ export default defineConfig({
   nitro: {
     preset: "node-server",
   },
+  vite: {
+    define: {
+      // Data/hora do build, usada no rodapé como "última atualização".
+      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    },
+  },
 });
