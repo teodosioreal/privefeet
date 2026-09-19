@@ -20,6 +20,10 @@
 //   GET  /api/leads/:arquivo         -> serve a foto que ela mandou no formulário (avatar do perfil)
 //   POST /api/auction/start-fake     -> inicia um leilão de teste da usuária logada, com lances
 //                                        simulados de ~30 compradores fictícios chegando aos poucos
+//                                        (o primeiro de cada conta já nasce sozinho no cadastro; os
+//                                        seguintes ficam girando sozinhos depois que um termina)
+//   POST /api/account/subscribe      -> ativa o plano (mock, sem pagamento de verdade ainda) —
+//                                        libera aceitar lance nos leilões depois do primeiro grátis
 //
 // Variáveis de ambiente:
 //   PORT                    (padrão 3021)
@@ -125,6 +129,12 @@ if (!auctionColumns.some((c) => c.name === "accepted_bid_id")) {
 if (!auctionColumns.some((c) => c.name === "seller_account_id")) {
   db.exec(`ALTER TABLE auctions ADD COLUMN seller_account_id INTEGER REFERENCES accounts(id)`);
 }
+// O primeiro leilão de cada conta é sempre liberado de graça (nasce junto
+// com o cadastro); os leilões seguintes, que ficam girando sozinhos depois
+// disso, só podem ser aceitos por quem assinou o plano.
+if (!auctionColumns.some((c) => c.name === "is_free")) {
+  db.exec(`ALTER TABLE auctions ADD COLUMN is_free INTEGER NOT NULL DEFAULT 0`);
+}
 
 // Migração: campos de login (email, telefone, usuário, senha) na tabela de
 // contas, que já existia antes deles.
@@ -135,6 +145,7 @@ for (const [name, def] of [
   ["username", "TEXT"],
   ["password_hash", "TEXT"],
   ["avatar_path", "TEXT"],
+  ["plan_active", "INTEGER NOT NULL DEFAULT 0"],
 ]) {
   if (!accountColumns.some((c) => c.name === name)) {
     db.exec(`ALTER TABLE accounts ADD COLUMN ${name} ${def}`);
@@ -252,8 +263,10 @@ const insertAuction = db.prepare(`
   INSERT INTO auctions (external_id, status, ends_at) VALUES (?, 'active', ?)
 `);
 const insertFakeAuction = db.prepare(`
-  INSERT INTO auctions (external_id, status, ends_at, seller_account_id) VALUES (?, 'active', ?, ?)
+  INSERT INTO auctions (external_id, status, ends_at, seller_account_id, is_free) VALUES (?, 'active', ?, ?, ?)
 `);
+const countAuctionsForAccount = db.prepare(`SELECT COUNT(*) AS n FROM auctions WHERE seller_account_id = ?`);
+const activatePlan = db.prepare(`UPDATE accounts SET plan_active = 1, updated_at = datetime('now') WHERE id = ?`);
 const updateAuctionEndsAt = db.prepare(`UPDATE auctions SET ends_at = ?, updated_at = datetime('now') WHERE id = ?`);
 const endAuction = db.prepare(`
   UPDATE auctions SET status = 'ended', winner_name = ?, winner_amount_centavos = ?, updated_at = datetime('now') WHERE id = ?
@@ -303,6 +316,7 @@ function toPublicAuction(row) {
     winnerName: row.winner_name,
     winnerAmount: row.winner_amount_centavos != null ? row.winner_amount_centavos / 100 : null,
     acceptedBidId: row.accepted_bid_id ?? null,
+    isFree: !!row.is_free,
     bids,
   };
 }
@@ -313,6 +327,7 @@ function toPublicAccount(row) {
     name: row.name,
     handle: row.handle,
     avatar: row.avatar_path ? `/api/leads/${row.avatar_path.split("/").pop()}` : null,
+    planActive: !!row.plan_active,
     saldo: row.saldo_centavos / 100,
     esteMes: row.mes_centavos / 100,
     seguidores: row.seguidores,
@@ -412,12 +427,13 @@ function shuffleArray(arr) {
   return a;
 }
 
-// Agenda de 6 a 10 lances chegando aos poucos (não tudo de uma vez), com
-// valor sempre subindo, pra parecer uma disputa real. Timers em memória —
-// se o processo reiniciar no meio, os lances restantes não chegam (ok pra
-// um fluxo de teste).
+// Agenda de 2 a 8 lances chegando aos poucos (não tudo de uma vez), com
+// valor sempre subindo, pra parecer uma disputa real. A quantidade varia bem
+// leilão a leilão (uma hora 2, outra 5, outra 8) pra não ficar repetitivo
+// numa rotação contínua. Timers em memória — se o processo reiniciar no
+// meio, os lances restantes não chegam (ok pra um fluxo de teste).
 function scheduleFakeBids(auctionRowId, durationMs) {
-  const count = 6 + Math.floor(Math.random() * 5); // 6–10 lances
+  const count = 2 + Math.floor(Math.random() * 7); // 2–8 lances
   const bidders = shuffleArray(FAKE_BIDDERS).slice(0, count);
   let amountCentavos = (20 + Math.floor(Math.random() * 30)) * 100; // começa em R$20–50
 
@@ -435,6 +451,23 @@ function scheduleFakeBids(auctionRowId, durationMs) {
       }
     }, delay);
   });
+}
+
+// Cria um leilão fake pra conta — usado tanto no primeiro leilão automático
+// (nasce junto com o cadastro, sem ela precisar clicar em nada) quanto nos
+// que ficam girando sozinhos depois. Só o primeiro de cada conta é grátis;
+// os seguintes exigem plano ativo na hora de ACEITAR um lance (o leilão em
+// si continua rodando pra todo mundo, só a aceitação é que é travada).
+function createFakeAuctionForAccount(account) {
+  const durationMs = 90 * 1000; // 90s — dá tempo de ver os lances chegando
+  const externalId = `fake-${account.external_id}-${Date.now()}`;
+  const endsAt = new Date(Date.now() + durationMs).toISOString();
+  const { n } = countAuctionsForAccount.get(account.id);
+  const isFree = n === 0 ? 1 : 0;
+  insertFakeAuction.run(externalId, endsAt, account.id, isFree);
+  const auctionRow = getAuctionByExternalId.get(externalId);
+  scheduleFakeBids(auctionRow.id, durationMs);
+  return auctionRow;
 }
 
 // ===== Login/cadastro =====
@@ -648,6 +681,8 @@ async function handleRequest(req, res) {
     );
     const account = getAccountById.get(info.lastInsertRowid);
     await createSessionFor(res, account.id);
+    // Já entra direto no primeiro leilão — sem precisar clicar em nada.
+    createFakeAuctionForAccount(account);
 
     res.writeHead(201);
     res.end(JSON.stringify({ ok: true, account: toPublicAccount(account) }));
@@ -775,6 +810,23 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // Assinatura do plano — por enquanto é só um mock (sem gateway de
+  // pagamento de verdade ainda): ativa na hora, só pra liberar o fluxo de
+  // teste de "aceitar lance" nos leilões depois do primeiro grátis.
+  if (req.method === "POST" && url.pathname === "/api/account/subscribe") {
+    const account = getSessionAccount(req);
+    if (!account) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ ok: false, error: "não autenticado" }));
+      return;
+    }
+    activatePlan.run(account.id);
+    const updated = getAccountById.get(account.id);
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, account: toPublicAccount(updated) }));
+    return;
+  }
+
   // Recebe as respostas do formulário de recrutamento (funil externo) e já
   // cria/atualiza a conta dela — sem pedir e-mail/login/senha de novo. A
   // resposta traz um link de uso único que loga ela direto no painel.
@@ -828,6 +880,10 @@ async function handleRequest(req, res) {
       const externalId = `lead_${whatsappId}_${Date.now()}`;
       insertLeadAccount.run(externalId, nome, `@${handleBase}`, whatsappId);
       account = getAccountByPhone.get(whatsappId);
+      // Conta nova de verdade — já entra direto no primeiro leilão. Se for
+      // o mesmo telefone mandando de novo (conta reaproveitada), não mexe
+      // no leilão que ela já possa ter em andamento.
+      createFakeAuctionForAccount(account);
     } else {
       updateLeadAccountName.run(nome, account.id);
     }
@@ -1093,14 +1149,7 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const durationMs = 90 * 1000; // 90s — dá tempo de ver os lances chegando
-    const externalId = `fake-${account.external_id}-${Date.now()}`;
-    const endsAt = new Date(Date.now() + durationMs).toISOString();
-    insertFakeAuction.run(externalId, endsAt, account.id);
-    const auctionRow = getAuctionByExternalId.get(externalId);
-
-    scheduleFakeBids(auctionRow.id, durationMs);
-
+    const auctionRow = createFakeAuctionForAccount(account);
     res.writeHead(201);
     res.end(JSON.stringify({ ok: true, auction: toPublicAuction(auctionRow) }));
     return;
@@ -1141,6 +1190,16 @@ async function handleRequest(req, res) {
     if (auction.accepted_bid_id != null) {
       res.writeHead(409);
       res.end(JSON.stringify({ ok: false, error: "esse leilão já teve um lance aceito" }));
+      return;
+    }
+    // Só o primeiro leilão de cada conta é grátis. Os que ficam girando
+    // sozinhos depois disso continuam rolando lance normalmente — ela só
+    // não consegue ACEITAR nenhum deles até assinar o plano.
+    if (!auction.is_free && !account.plan_active) {
+      res.writeHead(403);
+      res.end(
+        JSON.stringify({ ok: false, error: "assine o plano pra participar desse leilão", requiresPlan: true }),
+      );
       return;
     }
     const bid = getBidById.get(bid_id, auction.id);

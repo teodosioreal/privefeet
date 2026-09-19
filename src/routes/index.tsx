@@ -174,10 +174,15 @@ type Auction = {
   winnerName: string | null;
   winnerAmount: number | null;
   acceptedBidId: number | null;
+  isFree: boolean;
   bids: AuctionBid[];
 };
 
 const AUCTION_POLL_MS = 5000;
+// Depois que um leilão termina, o próximo começa sozinho (sem clique) depois
+// de um intervalo curto e aleatório — dá a sensação de "outros leilões
+// continuam acontecendo" sem ficar instantâneo demais.
+const AUCTION_RESTART_DELAY_MS = [4000, 11000] as const;
 const FEED_REORDER_MS = 2 * 60 * 1000;
 
 function formatCountdown(totalSeconds: number) {
@@ -205,6 +210,7 @@ type Account = {
   name: string;
   handle: string;
   avatar: string | null;
+  planActive: boolean;
   saldo: number;
   esteMes: number;
   seguidores: number;
@@ -218,6 +224,7 @@ const DEFAULT_ACCOUNT: Account = {
   name: "Teodosio Real",
   handle: "@teodosio",
   avatar: null,
+  planActive: false,
   saldo: 75,
   esteMes: 1240,
   seguidores: 312,
@@ -267,6 +274,7 @@ function Dashboard() {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [showBids, setShowBids] = useState(false);
   const autoOpenedForRef = useRef<string | null>(null); // evita reabrir o popup pro mesmo leilão
+  const autoRestartedForRef = useRef<string | null>(null); // evita reiniciar duas vezes o mesmo leilão encerrado
   const [showPlan, setShowPlan] = useState(false);
   const [planCycle, setPlanCycle] = useState<"mensal" | "anual">("anual");
   const [account, setAccount] = useState<Account>(DEFAULT_ACCOUNT);
@@ -281,7 +289,13 @@ function Dashboard() {
   // A usuária vê os lances recebidos no PRÓPRIO leilão e escolhe qual
   // aceitar — não precisa ser o maior. Só nesse momento o valor entra na
   // carteira dela. Sempre via sessão — o painel já exige login pra existir.
+  // Só o primeiro leilão (o que já nasce junto com o cadastro) é grátis; os
+  // que ficam girando sozinhos depois exigem plano ativo pra aceitar.
   const acceptBid = async (bidId: number) => {
+    if (auction && !auction.isFree && !account.planActive) {
+      setShowPlan(true);
+      return;
+    }
     setAcceptingBidId(bidId);
     try {
       const res = await fetch("/api/auction/accept-bid", {
@@ -294,6 +308,8 @@ function Dashboard() {
         setAuction(data.auction);
         setAccount(data.account);
         setSaleNotice({ bidderName: data.auction.winnerName, amount: data.auction.winnerAmount });
+      } else if (data.requiresPlan) {
+        setShowPlan(true);
       }
     } catch {
       // sem conexão com o webhook service: não trava a tela, só não credita
@@ -302,12 +318,34 @@ function Dashboard() {
     }
   };
 
+  const [subscribing, setSubscribing] = useState(false);
+
+  // Mock por enquanto (sem gateway de pagamento de verdade) — ativa o plano
+  // na hora, só pra liberar o fluxo de teste de aceitar lance.
+  const subscribe = async () => {
+    setSubscribing(true);
+    try {
+      const res = await fetch("/api/account/subscribe", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setAccount(data.account);
+        setShowPlan(false);
+      }
+    } catch {
+      // sem conexão: fica no popup, ela pode tentar de novo
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
   const [startingFakeAuction, setStartingFakeAuction] = useState(false);
   const [fakeAuctionError, setFakeAuctionError] = useState<string | null>(null);
 
   // Fluxo de teste: a usuária (logada de verdade, via cadastro/formulário)
   // inicia o próprio leilão fake — compradores fictícios começam a dar
-  // lance sozinhos, pra ela testar a tela de aceitar lance.
+  // lance sozinhos, pra ela testar a tela de aceitar lance. O primeiro já
+  // nasce sozinho no cadastro; isso aqui serve pra reiniciar automaticamente
+  // (rotação contínua) e como botão de fallback se algo falhar no meio.
   const startFakeAuction = async () => {
     setStartingFakeAuction(true);
     setFakeAuctionError(null);
@@ -431,6 +469,24 @@ function Dashboard() {
       autoOpenedForRef.current = auction.externalId;
     }
   }, [auction]);
+
+  // "Outros leilões continuam acontecendo" — depois que um termina, o
+  // próximo começa sozinho pouco depois, sem ela precisar clicar em nada.
+  // Depende só do externalId/status (não do objeto `auction` inteiro, que
+  // muda de referência a cada poll de 5s) — senão o efeito é desmontado e
+  // remontado a cada poll, cancelando o setTimeout antes dele disparar.
+  useEffect(() => {
+    if (auction?.status !== "ended") return;
+    const externalId = auction.externalId;
+    if (autoRestartedForRef.current === externalId) return;
+    autoRestartedForRef.current = externalId;
+    const [min, max] = AUCTION_RESTART_DELAY_MS;
+    const delay = min + Math.random() * (max - min);
+    const t = setTimeout(() => {
+      startFakeAuction();
+    }, delay);
+    return () => clearTimeout(t);
+  }, [auction?.externalId, auction?.status]);
 
   const closeBids = () => setShowBids(false);
 
@@ -732,30 +788,49 @@ function Dashboard() {
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Gavel className="h-4 w-4 text-brand" /> Lances recebidos
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Escolha qual lance você quer aceitar — o valor cai na sua carteira na hora.
-              </p>
+              {auction.isFree || account.planActive ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Escolha qual lance você quer aceitar — o valor cai na sua carteira na hora.
+                </p>
+              ) : (
+                <p className="mt-1 flex items-center gap-1.5 text-xs text-brand">
+                  <Lock className="h-3 w-3 shrink-0" /> Assine o plano pra aceitar lances a partir daqui.
+                </p>
+              )}
               <ul className="mt-4 space-y-2">
-                {auction.bids.map((bid) => (
-                  <li
-                    key={bid.id}
-                    className="flex items-center justify-between gap-3 rounded-2xl bg-accent/60 px-3 py-2.5"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">
-                        {bid.flag} {bid.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{formatBRL(bid.amount)}</p>
-                    </div>
-                    <button
-                      onClick={() => acceptBid(bid.id)}
-                      disabled={acceptingBidId !== null}
-                      className="shrink-0 rounded-xl bg-brand px-3 py-1.5 text-xs font-bold text-brand-foreground disabled:opacity-50"
+                {auction.bids.map((bid) => {
+                  const locked = !auction.isFree && !account.planActive;
+                  return (
+                    <li
+                      key={bid.id}
+                      className="flex items-center justify-between gap-3 rounded-2xl bg-accent/60 px-3 py-2.5"
                     >
-                      {acceptingBidId === bid.id ? "Aceitando…" : "Aceitar"}
-                    </button>
-                  </li>
-                ))}
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">
+                          {bid.flag} {bid.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{formatBRL(bid.amount)}</p>
+                      </div>
+                      <button
+                        onClick={() => acceptBid(bid.id)}
+                        disabled={acceptingBidId !== null}
+                        className={`shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold disabled:opacity-50 ${
+                          locked ? "bg-muted text-muted-foreground" : "bg-brand text-brand-foreground"
+                        }`}
+                      >
+                        {acceptingBidId === bid.id ? (
+                          "Aceitando…"
+                        ) : locked ? (
+                          <span className="flex items-center gap-1">
+                            <Lock className="h-3 w-3" /> Assinar
+                          </span>
+                        ) : (
+                          "Aceitar"
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           )}
@@ -880,64 +955,84 @@ function Dashboard() {
             </div>
 
             <div className="p-5">
-              <p className="text-sm text-muted-foreground">Ative pra liberar leilões e sacar seus ganhos.</p>
+              {account.planActive ? (
+                <div className="rounded-2xl border border-border p-4 text-center">
+                  <div
+                    className="mx-auto grid h-11 w-11 place-items-center rounded-full text-brand-foreground"
+                    style={{ background: "var(--gradient-brand)" }}
+                  >
+                    <Check className="h-5 w-5" />
+                  </div>
+                  <p className="mt-3 text-sm font-bold">Seu plano já está ativo</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Você pode participar de todos os próximos leilões e sacar seus ganhos.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    O primeiro leilão é grátis. Pra participar dos próximos e sacar seus ganhos, ative um plano.
+                  </p>
 
-              <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-muted p-1">
-                <button
-                  onClick={() => setPlanCycle("mensal")}
-                  className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
-                    planCycle === "mensal" ? "bg-card text-foreground shadow" : "text-muted-foreground"
-                  }`}
-                >
-                  Mensal
-                </button>
-                <button
-                  onClick={() => setPlanCycle("anual")}
-                  className={`relative rounded-lg py-2 text-sm font-semibold transition-colors ${
-                    planCycle === "anual" ? "bg-card text-foreground shadow" : "text-muted-foreground"
-                  }`}
-                >
-                  Anual
-                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-foreground">
-                    Mais popular
-                  </span>
-                </button>
-              </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-muted p-1">
+                    <button
+                      onClick={() => setPlanCycle("mensal")}
+                      className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
+                        planCycle === "mensal" ? "bg-card text-foreground shadow" : "text-muted-foreground"
+                      }`}
+                    >
+                      Mensal
+                    </button>
+                    <button
+                      onClick={() => setPlanCycle("anual")}
+                      className={`relative rounded-lg py-2 text-sm font-semibold transition-colors ${
+                        planCycle === "anual" ? "bg-card text-foreground shadow" : "text-muted-foreground"
+                      }`}
+                    >
+                      Anual
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-foreground">
+                        Mais popular
+                      </span>
+                    </button>
+                  </div>
 
-              <div className="mt-5 rounded-2xl border border-border p-4">
-                <p className="text-sm font-bold">{planCycle === "anual" ? "Plano Anual" : "Plano Mensal"}</p>
-                <p className="text-xs text-muted-foreground">
-                  {planCycle === "anual" ? "Pague 1 vez, use o ano todo" : "Renovação automática todo mês"}
-                </p>
-                <p className="mt-2 text-3xl font-extrabold tracking-tight">
-                  {planCycle === "anual" ? "R$ 59" : "R$ 39"}
-                  <span className="text-sm font-semibold text-muted-foreground">
-                    {planCycle === "anual" ? "/ano" : "/mês"}
-                  </span>
-                </p>
+                  <div className="mt-5 rounded-2xl border border-border p-4">
+                    <p className="text-sm font-bold">{planCycle === "anual" ? "Plano Anual" : "Plano Mensal"}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {planCycle === "anual" ? "Pague 1 vez, use o ano todo" : "Renovação automática todo mês"}
+                    </p>
+                    <p className="mt-2 text-3xl font-extrabold tracking-tight">
+                      {planCycle === "anual" ? "R$ 59" : "R$ 39"}
+                      <span className="text-sm font-semibold text-muted-foreground">
+                        {planCycle === "anual" ? "/ano" : "/mês"}
+                      </span>
+                    </p>
 
-                <ul className="mt-4 space-y-2 text-sm">
-                  {[
-                    "Saque PIX instantâneo 24h",
-                    "Leilões ilimitados",
-                    "Suporte prioritário 24/7",
-                    ...(planCycle === "anual" ? ["Economia de R$ 409 vs mensal"] : []),
-                  ].map((item) => (
-                    <li key={item} className="flex items-center gap-2">
-                      <Check className="h-4 w-4 shrink-0 text-brand" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                    <ul className="mt-4 space-y-2 text-sm">
+                      {[
+                        "Saque PIX instantâneo 24h",
+                        "Leilões ilimitados",
+                        "Suporte prioritário 24/7",
+                        ...(planCycle === "anual" ? ["Economia de R$ 409 vs mensal"] : []),
+                      ].map((item) => (
+                        <li key={item} className="flex items-center gap-2">
+                          <Check className="h-4 w-4 shrink-0 text-brand" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
 
-              <a
-                href="#"
-                className="mt-5 block rounded-xl py-3 text-center text-sm font-bold text-brand-foreground"
-                style={{ background: "var(--gradient-brand)" }}
-              >
-                Gerar PIX e finalizar
-              </a>
+                  <button
+                    onClick={subscribe}
+                    disabled={subscribing}
+                    className="mt-5 block w-full rounded-xl py-3 text-center text-sm font-bold text-brand-foreground disabled:opacity-60"
+                    style={{ background: "var(--gradient-brand)" }}
+                  >
+                    {subscribing ? "Ativando…" : "Gerar PIX e finalizar"}
+                  </button>
+                </>
+              )}
 
               <p className="mt-3 text-center text-xs text-muted-foreground">
                 🛡️ Site protegido · Seus dados em segurança
