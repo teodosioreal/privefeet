@@ -174,6 +174,9 @@ type Auction = {
   winnerName: string | null;
   winnerAmount: number | null;
   acceptedBidId: number | null;
+  // Esse leilão em particular nasceu dentro da janela grátis de 3h? Se não,
+  // aceitar um lance dele exige plano ativo.
+  isFree: boolean;
   acceptDeadline: string;
   bids: AuctionBid[];
 };
@@ -305,16 +308,18 @@ function Dashboard() {
   const [acceptingBidId, setAcceptingBidId] = useState<number | null>(null);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [saleNotice, setSaleNotice] = useState<{ bidderName: string; amount: number } | null>(null);
+  const [showEnteredNotice, setShowEnteredNotice] = useState(false);
+  const enteredNoticeShownRef = useRef<string | null>(null); // evita repetir pro mesmo leilão
   const [loggedIn, setLoggedIn] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
   // A usuária vê os lances recebidos no PRÓPRIO leilão e escolhe qual
   // aceitar — não precisa ser o maior. Só nesse momento o valor entra na
   // carteira dela. Sempre via sessão — o painel já exige login pra existir.
-  // Participa de quantos leilões quiser de graça enquanto não aceitar
-  // nenhuma oferta; só trava depois que já aceitou a primeira.
+  // Cada leilão já nasce marcado grátis ou não (um grátis a cada 3h) —
+  // aceitar um lance de um leilão pago exige plano ativo.
   const acceptBid = async (bidId: number) => {
-    if (account.hasAcceptedBid && !account.planActive) {
+    if (auction && !auction.isFree && !account.planActive) {
       setShowPlan(true);
       return;
     }
@@ -537,6 +542,16 @@ function Dashboard() {
     return () => clearInterval(t);
   }, [auction?.externalId, auction?.status]);
 
+  // Avisa que ela entrou no leilão assim que um fica ativo — tanto o
+  // primeiro (vindo do formulário) quanto os seguintes (depois de enviar
+  // foto nova). Só uma vez por leilão.
+  useEffect(() => {
+    if (auction?.status === "active" && enteredNoticeShownRef.current !== auction.externalId) {
+      setShowEnteredNotice(true);
+      enteredNoticeShownRef.current = auction.externalId;
+    }
+  }, [auction?.externalId, auction?.status]);
+
   // Depois que o leilão encerra, quanto tempo ainda falta pra ela poder
   // aceitar algum lance (janela de 15min a partir do fim — ver
   // ACCEPT_DEADLINE_MS no servidor). Some quando já foi aceito.
@@ -655,14 +670,19 @@ function Dashboard() {
           )}
           {auction?.status === "ended" && (
             <button onClick={() => setShowBids(true)} className="underline decoration-white/50 underline-offset-2 hover:decoration-white">
-              Leilão encerrado · ver resultado
+              Seu leilão já terminou · ver resultado
             </button>
           )}
           {!auction && <span className="text-white/85">Nenhum leilão no momento</span>}
         </div>
+        {auction?.status !== "active" && (
+          <p className="mx-auto max-w-[1400px] px-4 pb-2 text-center text-[11px] leading-snug text-white/85 sm:text-xs">
+            Você pode entrar em leilões gratuitos de 3 em 3 horas.
+          </p>
+        )}
       </div>
 
-      <div className="mx-auto flex max-w-[1400px] gap-6 px-4 pb-6 pt-16">
+      <div className="mx-auto flex max-w-[1400px] gap-6 px-4 pb-6 pt-20">
         {/* Left sidebar */}
         <aside
           className="sticky top-6 hidden h-[calc(100vh-3rem)] w-64 shrink-0 flex-col justify-between rounded-3xl bg-card p-5 lg:flex"
@@ -908,51 +928,37 @@ function Dashboard() {
 
           {/* Depois que ela já aceitou uma oferta pela primeira vez, o leilão
               para de girar sozinho — só entra em outro enviando uma foto nova.
-              Só o primeiro leilão é grátis: enviar essa foto nova exige plano. */}
+              Um leilão novo é grátis a cada 3h; fora dessa janela, o próprio
+              servidor pede assinatura do plano ao tentar enviar (abre o
+              popup de plano na hora, sem travar o botão aqui de antemão —
+              a gente não sabe do lado do cliente quando foi o último grátis). */}
           {loggedIn && account.hasAcceptedBid && (!auction || auction.status === "ended") && (
             <section className="rounded-3xl bg-card p-5 text-center" style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-center justify-center gap-2 text-sm font-semibold">
                 <Camera className="h-4 w-4 text-brand" /> Envie uma foto pra continuar
               </div>
-              {account.planActive ? (
-                <>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Manda uma foto nova pra entrar em outro leilão e receber mais lances.
-                  </p>
-                  <label
-                    className={`mt-4 block w-full cursor-pointer rounded-xl py-2.5 text-sm font-bold text-brand-foreground ${
-                      uploadingPhoto ? "opacity-60" : ""
-                    }`}
-                    style={{ background: "var(--gradient-brand)" }}
-                  >
-                    {uploadingPhoto ? "Enviando…" : "Enviar foto"}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      disabled={uploadingPhoto}
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = "";
-                        if (file) uploadPhotoAndStartAuction(file);
-                      }}
-                    />
-                  </label>
-                </>
-              ) : (
-                <>
-                  <p className="mt-1 flex items-center justify-center gap-1.5 text-xs text-brand">
-                    <Lock className="h-3 w-3 shrink-0" /> Assine o plano pra enviar outra foto.
-                  </p>
-                  <button
-                    onClick={() => setShowPlan(true)}
-                    className="mt-4 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground"
-                    style={{ background: "var(--gradient-brand)" }}
-                  >
-                    Assinar plano
-                  </button>
-                </>
-              )}
+              <p className="mt-1 text-xs text-muted-foreground">
+                Você tem um leilão grátis a cada 3 horas. Fora desse período, é preciso assinar o plano.
+              </p>
+              <label
+                className={`mt-4 block w-full cursor-pointer rounded-xl py-2.5 text-sm font-bold text-brand-foreground ${
+                  uploadingPhoto ? "opacity-60" : ""
+                }`}
+                style={{ background: "var(--gradient-brand)" }}
+              >
+                {uploadingPhoto ? "Enviando…" : "Enviar foto"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={uploadingPhoto}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) uploadPhotoAndStartAuction(file);
+                  }}
+                />
+              </label>
               {uploadPhotoError && <p className="mt-2 text-xs text-red-500">{uploadPhotoError}</p>}
             </section>
           )}
@@ -968,18 +974,18 @@ function Dashboard() {
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Gavel className="h-4 w-4 text-brand" /> Lances recebidos
               </div>
-              {!account.hasAcceptedBid || account.planActive ? (
+              {auction.isFree || account.planActive ? (
                 <p className="mt-1 text-xs text-muted-foreground">
                   Escolha qual lance você quer aceitar — o valor cai na sua carteira na hora.
                 </p>
               ) : (
                 <p className="mt-1 flex items-center gap-1.5 text-xs text-brand">
-                  <Lock className="h-3 w-3 shrink-0" /> Assine o plano pra aceitar outra oferta.
+                  <Lock className="h-3 w-3 shrink-0" /> Assine o plano pra aceitar essa oferta.
                 </p>
               )}
               <ul className="mt-4 space-y-2">
                 {auction.bids.map((bid) => {
-                  const locked = account.hasAcceptedBid && !account.planActive;
+                  const locked = !auction.isFree && !account.planActive;
                   return (
                     <li
                       key={bid.id}
@@ -1042,7 +1048,7 @@ function Dashboard() {
               style={{ background: "var(--gradient-brand)" }}
             >
               <h3 className="flex items-center gap-2 text-lg font-extrabold">
-                <Crown className="h-5 w-5" /> {auction.status === "ended" ? "Leilão encerrado" : "Últimos lances"}
+                <Crown className="h-5 w-5" /> {auction.status === "ended" ? "Seu leilão já terminou" : "Últimos lances"}
               </h3>
               <button
                 onClick={closeBids}
@@ -1066,7 +1072,7 @@ function Dashboard() {
             {(() => {
               const acceptWindowOpen = Date.now() < new Date(auction.acceptDeadline).getTime();
               const canPickHere = auction.acceptedBidId == null;
-              const locked = account.hasAcceptedBid && !account.planActive;
+              const locked = !auction.isFree && !account.planActive;
 
               return (
                 <>
@@ -1283,17 +1289,70 @@ function Dashboard() {
             >
               <Wallet className="h-7 w-7" />
             </div>
-            <h3 className="mt-4 text-lg font-extrabold">Atualizamos sua carteira!</h3>
+            <h3 className="mt-4 text-lg font-extrabold">🎉 Parabéns pela venda!</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Parabéns pela sua venda — lance de {saleNotice.bidderName} aceito por{" "}
-              <span className="font-bold text-foreground">{formatBRL(saleNotice.amount)}</span>.
+              Lance de {saleNotice.bidderName} aceito por{" "}
+              <span className="font-bold text-foreground">{formatBRL(saleNotice.amount)}</span> — já caiu na
+              sua carteira.
             </p>
+
+            {!account.pixKey && (
+              <div className="mt-4 rounded-2xl bg-accent p-4 text-left">
+                <p className="text-sm font-bold">Falta um passo pra sacar</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Cadastre seu nome completo e sua chave PIX em Minha conta pra poder sacar esse valor.
+                </p>
+                <Link
+                  to="/minha-conta"
+                  className="mt-3 block w-full rounded-xl py-2 text-center text-xs font-bold text-brand-foreground"
+                  style={{ background: "var(--gradient-brand)" }}
+                >
+                  Cadastrar chave PIX
+                </Link>
+              </div>
+            )}
+
             <button
               onClick={() => setSaleNotice(null)}
               className="mt-5 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground"
               style={{ background: "var(--gradient-brand)" }}
             >
               Show!
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Popup — Aviso de entrada no leilão (primeiro da conta ou depois de
+          enviar foto nova), com a dica de esperar ou aceitar na hora. */}
+      {showEnteredNotice && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4 backdrop-blur-sm"
+          onClick={() => setShowEnteredNotice(false)}
+        >
+          <div
+            className="w-full max-w-sm overflow-hidden rounded-3xl bg-card p-6 text-center"
+            style={{ boxShadow: "0 30px 80px -20px rgba(0,0,0,0.6)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="mx-auto grid h-14 w-14 place-items-center rounded-full text-brand-foreground"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              <Gavel className="h-7 w-7" />
+            </div>
+            <h3 className="mt-4 text-lg font-extrabold">Você está nesse leilão!</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Os lances vão chegando aos poucos no primeiro minuto e meio. Você pode esperar até o
+              leilão terminar pra tentar pegar o valor mais alto, ou aceitar uma oferta a qualquer
+              momento — a escolha é sua.
+            </p>
+            <button
+              onClick={() => setShowEnteredNotice(false)}
+              className="mt-5 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              Entendi
             </button>
           </div>
         </div>

@@ -143,9 +143,8 @@ if (!auctionColumns.some((c) => c.name === "accepted_bid_id")) {
 if (!auctionColumns.some((c) => c.name === "seller_account_id")) {
   db.exec(`ALTER TABLE auctions ADD COLUMN seller_account_id INTEGER REFERENCES accounts(id)`);
 }
-// Coluna antiga (não é mais usada pra decidir o que é grátis — ver
-// countAcceptedForAccount mais abaixo — mas fica no schema por já existir
-// em bancos anteriores; sem custo mantê-la).
+// Marca se ESSE leilão em particular nasceu grátis (um a cada 3h) ou não —
+// ver canStartFreeAuction mais abaixo.
 if (!auctionColumns.some((c) => c.name === "is_free")) {
   db.exec(`ALTER TABLE auctions ADD COLUMN is_free INTEGER NOT NULL DEFAULT 0`);
 }
@@ -279,14 +278,22 @@ const insertAuction = db.prepare(`
   INSERT INTO auctions (external_id, status, ends_at) VALUES (?, 'active', ?)
 `);
 const insertFakeAuction = db.prepare(`
-  INSERT INTO auctions (external_id, status, ends_at, seller_account_id) VALUES (?, 'active', ?, ?)
+  INSERT INTO auctions (external_id, status, ends_at, seller_account_id, is_free) VALUES (?, 'active', ?, ?, ?)
 `);
 // Justo com ela: pode participar de quantos leilões quiser de graça
-// enquanto não aceitar nenhuma oferta. No instante em que aceita a
-// primeira, os leilões seguintes passam a exigir plano ativo.
+// enquanto não aceitar nenhuma oferta (ver hasAcceptedBid). Depois da
+// primeira aceita, o giro automático para — daí em diante, um leilão novo
+// (via upload de foto) só é de graça se já fez 3h desde o último leilão
+// grátis; se quiser entrar antes disso, precisa de plano ativo.
 const countAcceptedForAccount = db.prepare(
   `SELECT COUNT(*) AS n FROM auctions WHERE seller_account_id = ? AND accepted_bid_id IS NOT NULL`,
 );
+const hasRecentFreeAuction = db.prepare(
+  `SELECT COUNT(*) AS n FROM auctions WHERE seller_account_id = ? AND is_free = 1 AND created_at > datetime('now', '-3 hours')`,
+);
+function canStartFreeAuction(accountId) {
+  return hasRecentFreeAuction.get(accountId).n === 0;
+}
 const activatePlan = db.prepare(`UPDATE accounts SET plan_active = 1, updated_at = datetime('now') WHERE id = ?`);
 const savePixInfo = db.prepare(
   `UPDATE accounts SET pix_full_name = ?, pix_key = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -340,6 +347,7 @@ function toPublicAuction(row) {
     winnerName: row.winner_name,
     winnerAmount: row.winner_amount_centavos != null ? row.winner_amount_centavos / 100 : null,
     acceptedBidId: row.accepted_bid_id ?? null,
+    isFree: !!row.is_free,
     // Até quando ainda dá pra aceitar um lance desse leilão (ends_at + 15min).
     acceptDeadline: new Date(new Date(row.ends_at).getTime() + ACCEPT_DEADLINE_MS).toISOString(),
     bids,
@@ -463,17 +471,22 @@ function shuffleArray(arr) {
 // leilão a leilão (uma hora 2, outra 5, outra 8) pra não ficar repetitivo
 // numa rotação contínua. Timers em memória — se o processo reiniciar no
 // meio, os lances restantes não chegam (ok pra um fluxo de teste).
+// Todos os lances chegam dentro desse tempo, não importa quanto o leilão
+// inteiro dure — o resto do tempo (até o fim do leilão) fica livre pra ela
+// decidir: aceita uma oferta já ou espera pra ver se chega uma melhor.
+const BID_ARRIVAL_WINDOW_MS = 90 * 1000;
+
 function scheduleFakeBids(auctionRowId, durationMs) {
   const count = 2 + Math.floor(Math.random() * 7); // 2–8 lances
   const bidders = shuffleArray(FAKE_BIDDERS).slice(0, count);
   let amountCentavos = (20 + Math.floor(Math.random() * 30)) * 100; // começa em R$20–50
+  const bidWindowMs = Math.min(durationMs, BID_ARRIVAL_WINDOW_MS);
 
   bidders.forEach((bidder, i) => {
     amountCentavos += (5 + Math.floor(Math.random() * 40)) * 100; // sobe R$5–45 a cada lance
     const bidAmount = amountCentavos; // congela o valor DESSE lance — sem isso, todos os
     // timers liam a mesma variável já no valor final quando disparassem.
-    // Espalha os lances nos primeiros 70% do tempo do leilão, em ordem.
-    const delay = Math.round(((i + 1) / (count + 1)) * durationMs * 0.7);
+    const delay = Math.round(((i + 1) / (count + 1)) * bidWindowMs);
     setTimeout(() => {
       try {
         insertBid.run(auctionRowId, `fake-${auctionRowId}-${i}-${randomUUID()}`, bidder.name, bidder.flag, bidAmount);
@@ -497,7 +510,8 @@ function createFakeAuctionForAccount(account) {
   const durationMs = 4.5 * 60 * 1000; // 4min30s por leilão
   const externalId = `fake-${account.external_id}-${Date.now()}`;
   const endsAt = new Date(Date.now() + durationMs).toISOString();
-  insertFakeAuction.run(externalId, endsAt, account.id);
+  const isFree = canStartFreeAuction(account.id) ? 1 : 0;
+  insertFakeAuction.run(externalId, endsAt, account.id, isFree);
   const auctionRow = getAuctionByExternalId.get(externalId);
   scheduleFakeBids(auctionRow.id, durationMs);
   return auctionRow;
@@ -1320,12 +1334,16 @@ async function handleRequest(req, res) {
       res.end(JSON.stringify({ ok: false, error: "você já tem um leilão ativo agora" }));
       return;
     }
-    // Só o primeiro leilão é grátis. Pra mandar a segunda foto em diante
-    // (e assim entrar em outro leilão) ela precisa ter assinado o plano.
-    if (!account.plan_active) {
+    // Libera um leilão grátis a cada 3h — se ela quiser entrar em outro
+    // antes disso, precisa ter assinado o plano.
+    if (!canStartFreeAuction(account.id) && !account.plan_active) {
       res.writeHead(403);
       res.end(
-        JSON.stringify({ ok: false, error: "assine o plano pra enviar outra foto e entrar em outro leilão", requiresPlan: true }),
+        JSON.stringify({
+          ok: false,
+          error: "assine o plano pra enviar outra foto agora, ou espere seu próximo leilão grátis",
+          requiresPlan: true,
+        }),
       );
       return;
     }
@@ -1394,12 +1412,10 @@ async function handleRequest(req, res) {
       );
       return;
     }
-    // Justo com ela: pode participar (e aceitar) de quantos leilões quiser
-    // de graça enquanto a carteira dela continuar vazia. No instante em que
-    // aceita a PRIMEIRA oferta, os leilões seguintes passam a exigir plano
-    // ativo pra aceitar outra.
-    const alreadyAcceptedBefore = countAcceptedForAccount.get(account.id).n > 0;
-    if (alreadyAcceptedBefore && !account.plan_active) {
+    // Cada leilão já nasce marcado como grátis ou não (is_free), calculado
+    // na hora que ele foi criado — libera um grátis a cada 3h; fora dessa
+    // janela, só aceita com plano ativo.
+    if (!auction.is_free && !account.plan_active) {
       res.writeHead(403);
       res.end(
         JSON.stringify({ ok: false, error: "assine o plano pra participar desse leilão", requiresPlan: true }),
