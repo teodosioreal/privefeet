@@ -68,6 +68,7 @@ type Post = {
   tag: string;
   text: string;
   image: string;
+  imageRatio: number;
   avatar: string;
   price: string;
   likes: string;
@@ -99,7 +100,8 @@ const rawPosts: Array<Omit<Post, "image" | "avatar">> = [
 
 const posts: Post[] = rawPosts.map((p, i) => ({
   ...p,
-  image: images[i % images.length]!,
+  image: images[i % images.length]!.src,
+  imageRatio: images[i % images.length]!.ratio,
   avatar: avatarImages[i % avatarImages.length]!,
 }));
 
@@ -130,7 +132,8 @@ function buildExtraPage(pageIndex: number): Post[] {
   const startIndex = rawPosts.length * (pageIndex + 1);
   return shuffle(rawPosts).map((p, i) => ({
     ...p,
-    image: images[(startIndex + i) % images.length]!,
+    image: images[(startIndex + i) % images.length]!.src,
+    imageRatio: images[(startIndex + i) % images.length]!.ratio,
     avatar: avatarImages[(startIndex + i) % avatarImages.length]!,
     time: FRESH_TIME_LABELS[i % FRESH_TIME_LABELS.length]!,
   }));
@@ -951,9 +954,8 @@ function PostCard({ post, priority }: { post: Post; priority?: boolean }) {
           src={post.image}
           alt={post.text}
           loading={priority ? "eager" : "lazy"}
-          width={1024}
-          height={768}
-          className="post-image-locked h-80 w-full object-cover"
+          style={{ aspectRatio: post.imageRatio }}
+          className="post-image-locked block w-full max-h-[75vh] object-contain bg-muted"
           onError={(e) => {
             e.currentTarget.style.visibility = "hidden";
           }}

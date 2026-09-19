@@ -160,7 +160,7 @@
    ============================================================ */
 .post-image-locked {
   filter: blur(3.5px) saturate(0.85) brightness(1.08) contrast(0.97);
-  transform: scale(1.07); /* esconde as bordas embaçadas */
+  transform: scale(1.02); /* só o suficiente pra esconder a borda amaciada pelo blur, sem cortar a foto */
 }
 
 .post-image-veil {
