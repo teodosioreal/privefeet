@@ -330,6 +330,8 @@ function toPublicAuction(row) {
     winnerName: row.winner_name,
     winnerAmount: row.winner_amount_centavos != null ? row.winner_amount_centavos / 100 : null,
     acceptedBidId: row.accepted_bid_id ?? null,
+    // Até quando ainda dá pra aceitar um lance desse leilão (ends_at + 15min).
+    acceptDeadline: new Date(new Date(row.ends_at).getTime() + ACCEPT_DEADLINE_MS).toISOString(),
     bids,
   };
 }
@@ -469,6 +471,10 @@ function scheduleFakeBids(auctionRowId, durationMs) {
     }, delay);
   });
 }
+
+// Depois que o prazo do leilão (ends_at) passa, ela ainda tem essa janela
+// pra aceitar algum lance recebido — depois disso, não dá mais.
+const ACCEPT_DEADLINE_MS = 15 * 60 * 1000;
 
 // Cria um leilão fake pra conta — usado tanto no primeiro leilão automático
 // (nasce junto com o cadastro, sem ela precisar clicar em nada) quanto nos
@@ -1257,6 +1263,16 @@ async function handleRequest(req, res) {
     if (auction.accepted_bid_id != null) {
       res.writeHead(409);
       res.end(JSON.stringify({ ok: false, error: "esse leilão já teve um lance aceito" }));
+      return;
+    }
+    // Depois que o leilão termina, ela ainda tem 15 minutos pra aceitar
+    // algum lance — passado isso, não dá mais.
+    const acceptDeadline = new Date(auction.ends_at).getTime() + ACCEPT_DEADLINE_MS;
+    if (Date.now() > acceptDeadline) {
+      res.writeHead(410);
+      res.end(
+        JSON.stringify({ ok: false, error: "o prazo de 15 minutos pra aceitar esse leilão já passou" }),
+      );
       return;
     }
     // Justo com ela: pode participar (e aceitar) de quantos leilões quiser

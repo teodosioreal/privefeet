@@ -174,6 +174,7 @@ type Auction = {
   winnerName: string | null;
   winnerAmount: number | null;
   acceptedBidId: number | null;
+  acceptDeadline: string;
   bids: AuctionBid[];
 };
 
@@ -276,6 +277,7 @@ function Avatar({ name, photo, size = "md" }: { name: string; photo?: string; si
 function Dashboard() {
   const [auction, setAuction] = useState<Auction | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [acceptSecondsLeft, setAcceptSecondsLeft] = useState(0);
   const [showBids, setShowBids] = useState(false);
   const autoOpenedForRef = useRef<string | null>(null); // evita reabrir o popup pro mesmo leilão
   const autoRestartedForRef = useRef<string | null>(null); // evita reiniciar duas vezes o mesmo leilão encerrado
@@ -286,6 +288,7 @@ function Dashboard() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [feedOrder, setFeedOrder] = useState<Post[]>(posts);
   const [acceptingBidId, setAcceptingBidId] = useState<number | null>(null);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
   const [saleNotice, setSaleNotice] = useState<{ bidderName: string; amount: number } | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
@@ -301,6 +304,7 @@ function Dashboard() {
       return;
     }
     setAcceptingBidId(bidId);
+    setAcceptError(null);
     try {
       const res = await fetch("/api/auction/accept-bid", {
         method: "POST",
@@ -314,6 +318,8 @@ function Dashboard() {
         setSaleNotice({ bidderName: data.auction.winnerName, amount: data.auction.winnerAmount });
       } else if (data.requiresPlan) {
         setShowPlan(true);
+      } else if (res.status === 410) {
+        setAcceptError(data.error || "O prazo pra aceitar esse leilão já passou.");
       }
     } catch {
       // sem conexão com o webhook service: não trava a tela, só não credita
@@ -464,6 +470,23 @@ function Dashboard() {
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   }, [auction?.endsAt, auction?.status]);
+
+  // Depois que o leilão encerra, quanto tempo ainda falta pra ela poder
+  // aceitar algum lance (janela de 15min a partir do fim — ver
+  // ACCEPT_DEADLINE_MS no servidor). Some quando já foi aceito.
+  useEffect(() => {
+    if (!auction || auction.status !== "ended" || auction.acceptedBidId != null) {
+      setAcceptSecondsLeft(0);
+      return;
+    }
+    const tick = () => {
+      const diff = Math.round((new Date(auction.acceptDeadline).getTime() - Date.now()) / 1000);
+      setAcceptSecondsLeft(Math.max(0, diff));
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [auction?.acceptDeadline, auction?.status, auction?.acceptedBidId]);
 
   // Abre o popup de lances sozinho quando o leilão encerra — só uma vez por
   // leilão, pra não reabrir toda vez que o usuário fechar e um novo poll chegar.
@@ -793,8 +816,12 @@ function Dashboard() {
           )}
 
           {/* Lances recebidos no leilão atual — a usuária escolhe qual aceitar
-              (não precisa ser o maior); só aí o valor entra na carteira dela. */}
-          {auction && auction.acceptedBidId == null && auction.bids.length > 0 && (
+              (não precisa ser o maior); só aí o valor entra na carteira dela.
+              Some depois que passam os 15min do prazo (mesma regra do popup). */}
+          {auction &&
+            auction.acceptedBidId == null &&
+            auction.bids.length > 0 &&
+            Date.now() < new Date(auction.acceptDeadline).getTime() && (
             <section className="rounded-3xl bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Gavel className="h-4 w-4 text-brand" /> Lances recebidos
@@ -894,35 +921,79 @@ function Dashboard() {
               </div>
             )}
 
-            {auction.bids.length === 0 ? (
-              <p className="px-5 py-8 text-center text-sm text-muted-foreground">
-                Ainda não chegou nenhum lance nesse leilão.
-              </p>
-            ) : (
-              <ul className="mt-2 divide-y divide-border">
-                {auction.bids.map((bid, i) => (
-                  <li
-                    key={`${bid.name}-${i}`}
-                    className={`flex items-center gap-3 px-5 py-3.5 ${i === 0 ? "bg-accent" : ""}`}
-                  >
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-muted text-xl">
-                      {bid.flag}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{bid.name}</p>
-                      {i === 0 && (
-                        <p className="text-[11px] font-bold uppercase tracking-wide text-brand">
-                          Lance mais alto
-                        </p>
+            {(() => {
+              const acceptWindowOpen = Date.now() < new Date(auction.acceptDeadline).getTime();
+              const canPickHere = auction.acceptedBidId == null;
+              const locked = account.hasAcceptedBid && !account.planActive;
+
+              return (
+                <>
+                  {canPickHere && auction.status === "ended" && (
+                    <p className="mx-5 mt-4 text-center text-xs text-muted-foreground">
+                      {acceptWindowOpen ? (
+                        <>Você tem <span className="font-bold tabular-nums text-brand">{formatCountdown(acceptSecondsLeft)}</span> pra aceitar um lance.</>
+                      ) : (
+                        "O prazo pra aceitar esse leilão já passou."
                       )}
-                    </div>
-                    <span className="ml-auto shrink-0 text-base font-extrabold tabular-nums tracking-tight">
-                      {formatBRL(bid.amount)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+                    </p>
+                  )}
+                  {acceptError && (
+                    <p className="mx-5 mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-center text-xs text-red-500">
+                      {acceptError}
+                    </p>
+                  )}
+
+                  {auction.bids.length === 0 ? (
+                    <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+                      Ainda não chegou nenhum lance nesse leilão.
+                    </p>
+                  ) : (
+                    <ul className="mt-2 divide-y divide-border">
+                      {auction.bids.map((bid, i) => (
+                        <li
+                          key={`${bid.name}-${i}`}
+                          className={`flex items-center gap-3 px-5 py-3.5 ${i === 0 ? "bg-accent" : ""}`}
+                        >
+                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-muted text-xl">
+                            {bid.flag}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold">{bid.name}</p>
+                            {i === 0 && (
+                              <p className="text-[11px] font-bold uppercase tracking-wide text-brand">
+                                Lance mais alto
+                              </p>
+                            )}
+                          </div>
+                          <span className="ml-auto shrink-0 text-base font-extrabold tabular-nums tracking-tight">
+                            {formatBRL(bid.amount)}
+                          </span>
+                          {canPickHere && acceptWindowOpen && (
+                            <button
+                              onClick={() => acceptBid(bid.id)}
+                              disabled={acceptingBidId !== null}
+                              className={`ml-3 shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold disabled:opacity-50 ${
+                                locked ? "bg-muted text-muted-foreground" : "bg-brand text-brand-foreground"
+                              }`}
+                            >
+                              {acceptingBidId === bid.id ? (
+                                "Aceitando…"
+                              ) : locked ? (
+                                <span className="flex items-center gap-1">
+                                  <Lock className="h-3 w-3" /> Assinar
+                                </span>
+                              ) : (
+                                "Aceitar"
+                              )}
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              );
+            })()}
 
             <div className="p-5 pt-3">
               <button
