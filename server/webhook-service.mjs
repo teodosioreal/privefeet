@@ -88,6 +88,15 @@ db.exec(`
   );
 `);
 
+// Migração: coluna nova numa tabela que já existia antes dela (SQLite não
+// deixa isso ir no CREATE TABLE IF NOT EXISTS acima, que só roda na criação).
+// Guarda qual lance a criadora escolheu aceitar (fluxo de teste: ela vê os
+// lances recebidos e escolhe um pra creditar na carteira dela).
+const auctionColumns = db.prepare(`PRAGMA table_info(auctions)`).all();
+if (!auctionColumns.some((c) => c.name === "accepted_bid_id")) {
+  db.exec(`ALTER TABLE auctions ADD COLUMN accepted_bid_id INTEGER REFERENCES auction_bids(id)`);
+}
+
 // Conta padrão exibida no painel hoje (dono do site), seedada uma vez com
 // os valores que já estavam fixos na tela.
 const DEFAULT_EXTERNAL_ID = "owner";
@@ -129,13 +138,20 @@ const insertBid = db.prepare(`
   VALUES (?, ?, ?, ?, ?)
 `);
 const getBidsForAuction = db.prepare(`
-  SELECT bidder_name, bidder_flag, amount_centavos FROM auction_bids
+  SELECT id, bidder_name, bidder_flag, amount_centavos FROM auction_bids
   WHERE auction_id = ? ORDER BY amount_centavos DESC LIMIT 20
+`);
+const getBidById = db.prepare(`SELECT * FROM auction_bids WHERE id = ? AND auction_id = ?`);
+const acceptBid = db.prepare(`
+  UPDATE auctions
+  SET status = 'ended', accepted_bid_id = ?, winner_name = ?, winner_amount_centavos = ?, updated_at = datetime('now')
+  WHERE id = ?
 `);
 
 function toPublicAuction(row) {
   if (!row) return null;
   const bids = getBidsForAuction.all(row.id).map((b) => ({
+    id: b.id,
     name: b.bidder_name,
     flag: b.bidder_flag || "🏳️",
     amount: b.amount_centavos / 100,
@@ -146,6 +162,7 @@ function toPublicAuction(row) {
     endsAt: row.ends_at,
     winnerName: row.winner_name,
     winnerAmount: row.winner_amount_centavos != null ? row.winner_amount_centavos / 100 : null,
+    acceptedBidId: row.accepted_bid_id ?? null,
     bids,
   };
 }
@@ -375,6 +392,69 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true, auction: toPublicAuction(saved) }));
       return;
     }
+  }
+
+  // Fluxo de teste: a própria usuária escolhe, entre os lances recebidos, qual
+  // aceitar — só então o valor cai na carteira dela. Chamado pelo navegador
+  // dela mesma (não pelo servidor de leilão externo), por isso não exige o
+  // secret do webhook, só o external_id de quem está aceitando.
+  if (req.method === "POST" && url.pathname === "/api/auction/accept-bid") {
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "invalid_json" }));
+      return;
+    }
+
+    const { external_id, bid_id } = body;
+    if (typeof external_id !== "string" || !external_id) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "external_id é obrigatório" }));
+      return;
+    }
+    if (typeof bid_id !== "number" || !Number.isInteger(bid_id)) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ ok: false, error: "bid_id é obrigatório" }));
+      return;
+    }
+
+    const auction = getLatestAuction.get();
+    if (!auction) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ ok: false, error: "nenhum leilão ainda" }));
+      return;
+    }
+    if (auction.accepted_bid_id != null) {
+      res.writeHead(409);
+      res.end(JSON.stringify({ ok: false, error: "esse leilão já teve um lance aceito" }));
+      return;
+    }
+    const bid = getBidById.get(bid_id, auction.id);
+    if (!bid) {
+      res.writeHead(404);
+      res.end(JSON.stringify({ ok: false, error: "lance não encontrado nesse leilão" }));
+      return;
+    }
+
+    let account = getAccountByExternalId.get(external_id);
+    if (!account) {
+      insertAccount.run(external_id, external_id, `@${external_id}`);
+      account = getAccountByExternalId.get(external_id);
+    }
+
+    acceptBid.run(bid.id, bid.bidder_name, bid.amount_centavos, auction.id);
+    bumpSaldo.run(bid.amount_centavos, account.id);
+    bumpMes.run(bid.amount_centavos, account.id);
+
+    const savedAuction = getAuctionByExternalId.get(auction.external_id);
+    const updatedAccount = getAccountByExternalId.get(external_id);
+    res.writeHead(200);
+    res.end(
+      JSON.stringify({ ok: true, auction: toPublicAuction(savedAuction), account: toPublicAccount(updatedAccount) }),
+    );
+    return;
   }
 
   res.writeHead(404);

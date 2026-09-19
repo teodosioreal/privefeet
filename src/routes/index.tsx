@@ -8,6 +8,7 @@ import {
   Check,
   Compass,
   Crown,
+  Gavel,
   Gift,
   Heart,
   Home,
@@ -165,13 +166,14 @@ const topCreators = [
 // ===== Leilão real (barra superior + popup de lances) =====
 // Dados vêm do servidor de leilão externo via webhook (POST /api/webhooks/auction);
 // aqui só buscamos o estado atual (GET /api/auction/current) periodicamente.
-type AuctionBid = { name: string; flag: string; amount: number };
+type AuctionBid = { id: number; name: string; flag: string; amount: number };
 type Auction = {
   externalId: string;
   status: "active" | "ended";
   endsAt: string;
   winnerName: string | null;
   winnerAmount: number | null;
+  acceptedBidId: number | null;
   bids: AuctionBid[];
 };
 
@@ -293,6 +295,34 @@ function Dashboard() {
   const [extraPages, setExtraPages] = useState<Post[][]>([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [feedOrder, setFeedOrder] = useState<Post[]>(posts);
+  const [acceptingBidId, setAcceptingBidId] = useState<number | null>(null);
+  const [saleNotice, setSaleNotice] = useState<{ bidderName: string; amount: number } | null>(null);
+
+  // Fluxo de teste: a usuária vê os lances recebidos no leilão atual e
+  // escolhe qual aceitar — não precisa ser o maior. Só nesse momento o
+  // valor entra na carteira dela.
+  const acceptBid = async (bidId: number) => {
+    const uid = resolveVisitorId();
+    if (!uid) return; // sem link próprio (?u=), não tem carteira pra creditar
+    setAcceptingBidId(bidId);
+    try {
+      const res = await fetch("/api/auction/accept-bid", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ external_id: uid, bid_id: bidId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setAuction(data.auction);
+        setAccount(data.account);
+        setSaleNotice({ bidderName: data.auction.winnerName, amount: data.auction.winnerAmount });
+      }
+    } catch {
+      // sem conexão com o webhook service: não trava a tela, só não credita
+    } finally {
+      setAcceptingBidId(null);
+    }
+  };
 
   // Embaralha a ordem dos posts iniciais a cada 2 minutos, pra quem fica com
   // a aba aberta não ver sempre a mesma sequência. As fotos/avatares
@@ -627,6 +657,41 @@ function Dashboard() {
             </button>
           </section>
 
+          {/* Lances recebidos no leilão atual — a usuária escolhe qual aceitar
+              (não precisa ser o maior); só aí o valor entra na carteira dela. */}
+          {auction && auction.acceptedBidId == null && auction.bids.length > 0 && (
+            <section className="rounded-3xl bg-card p-5" style={{ boxShadow: "var(--shadow-card)" }}>
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Gavel className="h-4 w-4 text-brand" /> Lances recebidos
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Escolha qual lance você quer aceitar — o valor cai na sua carteira na hora.
+              </p>
+              <ul className="mt-4 space-y-2">
+                {auction.bids.map((bid) => (
+                  <li
+                    key={bid.id}
+                    className="flex items-center justify-between gap-3 rounded-2xl bg-accent/60 px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">
+                        {bid.flag} {bid.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{formatBRL(bid.amount)}</p>
+                    </div>
+                    <button
+                      onClick={() => acceptBid(bid.id)}
+                      disabled={acceptingBidId !== null}
+                      className="shrink-0 rounded-xl bg-brand px-3 py-1.5 text-xs font-bold text-brand-foreground disabled:opacity-50"
+                    >
+                      {acceptingBidId === bid.id ? "Aceitando…" : "Aceitar"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section className="rounded-3xl p-5 text-brand-foreground" style={{ background: "var(--gradient-brand)" }}>
             <Gift className="h-6 w-6" />
             <h3 className="mt-3 text-base font-bold">Convide e ganhe</h3>
@@ -810,6 +875,39 @@ function Dashboard() {
                 🛡️ Site protegido · Seus dados em segurança
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup — Confirmação de venda (lance aceito, carteira atualizada) */}
+      {saleNotice && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4 backdrop-blur-sm"
+          onClick={() => setSaleNotice(null)}
+        >
+          <div
+            className="w-full max-w-sm overflow-hidden rounded-3xl bg-card p-6 text-center"
+            style={{ boxShadow: "0 30px 80px -20px rgba(0,0,0,0.6)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="mx-auto grid h-14 w-14 place-items-center rounded-full text-brand-foreground"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              <Wallet className="h-7 w-7" />
+            </div>
+            <h3 className="mt-4 text-lg font-extrabold">Atualizamos sua carteira!</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Parabéns pela sua venda — lance de {saleNotice.bidderName} aceito por{" "}
+              <span className="font-bold text-foreground">{formatBRL(saleNotice.amount)}</span>.
+            </p>
+            <button
+              onClick={() => setSaleNotice(null)}
+              className="mt-5 w-full rounded-xl py-2.5 text-sm font-bold text-brand-foreground"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              Show!
+            </button>
           </div>
         </div>
       )}
