@@ -55,7 +55,7 @@ export const Route = createFileRoute("/")({
 const navItems = [
   { label: "Feed", icon: Home, active: true },
   { label: "Explorar", icon: Compass, locked: true },
-  { label: "Assinaturas", icon: Star },
+  { label: "Assinaturas", icon: Star, locked: true },
   { label: "Mensagens", icon: MessageSquare, badge: "1", locked: true },
   { label: "Salvos", icon: Bookmark, locked: true },
   { label: "Perfil", icon: User, locked: true },
@@ -79,24 +79,24 @@ type Post = {
 const images = feedImages;
 
 const rawPosts: Array<Omit<Post, "image" | "avatar">> = [
-  { name: "Lunahype", handle: "@lunahype", time: "há 4 min", tag: "Pets", text: "Pés de veludo", price: "R$ 43,94", likes: "2.418", comments: "184" },
-  { name: "Marcellyfans", handle: "@marcellyfans", time: "há 12 min", tag: "Paisagem", text: "Velvet steps", price: "R$ 66,02", likes: "5.902", comments: "421" },
-  { name: "Beladreams", handle: "@beladreams", time: "há 25 min", tag: "Pets", text: "Pasos de seda", price: "R$ 54,98", likes: "3.117", comments: "256" },
-  { name: "Jujubacore", handle: "@jujubacore", time: "há 45 min", tag: "Aéreas", text: "خطى الحرير", price: "R$ 88,10", likes: "8.340", comments: "612" },
-  { name: "Anacrush", handle: "@anacrush", time: "há 1 h", tag: "Arquitetura", text: "Toque suave", price: "R$ 77,28", likes: "1.902", comments: "97" },
-  { name: "Melzinhaofc", handle: "@melzinhaofc", time: "há 1 h", tag: "Natureza", text: "Soft touch", price: "R$ 49,68", likes: "4.221", comments: "310" },
-  { name: "Claramood", handle: "@claramood", time: "há 2 h", tag: "Viagem", text: "Encanto sutil", price: "R$ 110,18", likes: "6.780", comments: "524" },
-  { name: "Vickylovers", handle: "@vickylovers", time: "há 2 h", tag: "Pets", text: "سحر خفي", price: "R$ 39,74", likes: "9.110", comments: "703" },
-  { name: "Manuforever", handle: "@manuforever", time: "há 3 h", tag: "Paisagem", text: "Charme nos detalhes", price: "R$ 61,61", likes: "2.980", comments: "142" },
-  { name: "Lalaflow", handle: "@lalaflow", time: "há 4 h", tag: "Pets", text: "Barefoot dreams", price: "R$ 68,45", likes: "3.640", comments: "221" },
-  { name: "Dudaglow", handle: "@dudaglow", time: "há 5 h", tag: "Viagem", text: "Magia en cada paso", price: "R$ 99,36", likes: "7.412", comments: "489" },
-  { name: "Giovannavibes", handle: "@giovannavibes", time: "há 6 h", tag: "Arquitetura", text: "أنوثة ناعمة", price: "R$ 55,20", likes: "1.455", comments: "88" },
-  { name: "Majuverse", handle: "@majuverse", time: "há 8 h", tag: "Natureza", text: "Pés descalços, alma livre", price: "R$ 44,16", likes: "5.130", comments: "367" },
-  { name: "Sofiacrush", handle: "@sofiacrush", time: "há 9 h", tag: "Pets", text: "Serene beauty", price: "R$ 63,81", likes: "4.008", comments: "295" },
-  { name: "Isaacore", handle: "@isaacore", time: "há 11 h", tag: "Paisagem", text: "Belleza oculta", price: "R$ 114,82", likes: "10.240", comments: "914" },
-  { name: "Biazone", handle: "@biazone", time: "há 13 h", tag: "Viagem", text: "خطوات رقيقة", price: "R$ 73,97", likes: "2.211", comments: "154" },
-  { name: "Carolvibes", handle: "@carolvibes", time: "há 16 h", tag: "Pets", text: "Elegância natural", price: "R$ 48,36", likes: "6.045", comments: "412" },
-  { name: "Ninahouse", handle: "@ninahouse", time: "há 20 h", tag: "Natureza", text: "Gentle stride", price: "R$ 81,70", likes: "3.874", comments: "268" },
+  { name: "Lunahype", handle: "@lunahype", time: "1 dia atrás", tag: "Pets", text: "Pés de veludo", price: "R$ 43,94", likes: "2.418", comments: "184" },
+  { name: "Marcellyfans", handle: "@marcellyfans", time: "1 dia atrás", tag: "Paisagem", text: "Velvet steps", price: "R$ 66,02", likes: "5.902", comments: "421" },
+  { name: "Beladreams", handle: "@beladreams", time: "2 dias atrás", tag: "Pets", text: "Pasos de seda", price: "R$ 54,98", likes: "3.117", comments: "256" },
+  { name: "Jujubacore", handle: "@jujubacore", time: "2 dias atrás", tag: "Aéreas", text: "خطى الحرير", price: "R$ 88,10", likes: "8.340", comments: "612" },
+  { name: "Anacrush", handle: "@anacrush", time: "3 dias atrás", tag: "Arquitetura", text: "Toque suave", price: "R$ 77,28", likes: "1.902", comments: "97" },
+  { name: "Melzinhaofc", handle: "@melzinhaofc", time: "3 dias atrás", tag: "Natureza", text: "Soft touch", price: "R$ 49,68", likes: "4.221", comments: "310" },
+  { name: "Claramood", handle: "@claramood", time: "4 dias atrás", tag: "Viagem", text: "Encanto sutil", price: "R$ 110,18", likes: "6.780", comments: "524" },
+  { name: "Vickylovers", handle: "@vickylovers", time: "4 dias atrás", tag: "Pets", text: "سحر خفي", price: "R$ 39,74", likes: "9.110", comments: "703" },
+  { name: "Manuforever", handle: "@manuforever", time: "5 dias atrás", tag: "Paisagem", text: "Charme nos detalhes", price: "R$ 61,61", likes: "2.980", comments: "142" },
+  { name: "Lalaflow", handle: "@lalaflow", time: "5 dias atrás", tag: "Pets", text: "Barefoot dreams", price: "R$ 68,45", likes: "3.640", comments: "221" },
+  { name: "Dudaglow", handle: "@dudaglow", time: "6 dias atrás", tag: "Viagem", text: "Magia en cada paso", price: "R$ 99,36", likes: "7.412", comments: "489" },
+  { name: "Giovannavibes", handle: "@giovannavibes", time: "6 dias atrás", tag: "Arquitetura", text: "أنوثة ناعمة", price: "R$ 55,20", likes: "1.455", comments: "88" },
+  { name: "Majuverse", handle: "@majuverse", time: "7 dias atrás", tag: "Natureza", text: "Pés descalços, alma livre", price: "R$ 44,16", likes: "5.130", comments: "367" },
+  { name: "Sofiacrush", handle: "@sofiacrush", time: "7 dias atrás", tag: "Pets", text: "Serene beauty", price: "R$ 63,81", likes: "4.008", comments: "295" },
+  { name: "Isaacore", handle: "@isaacore", time: "8 dias atrás", tag: "Paisagem", text: "Belleza oculta", price: "R$ 114,82", likes: "10.240", comments: "914" },
+  { name: "Biazone", handle: "@biazone", time: "8 dias atrás", tag: "Viagem", text: "خطوات رقيقة", price: "R$ 73,97", likes: "2.211", comments: "154" },
+  { name: "Carolvibes", handle: "@carolvibes", time: "9 dias atrás", tag: "Pets", text: "Elegância natural", price: "R$ 48,36", likes: "6.045", comments: "412" },
+  { name: "Ninahouse", handle: "@ninahouse", time: "9 dias atrás", tag: "Natureza", text: "Gentle stride", price: "R$ 81,70", likes: "3.874", comments: "268" },
 ];
 
 const posts: Post[] = rawPosts.map((p, i) => ({
@@ -202,6 +202,24 @@ const AUCTION_STATUS_PHRASES = [
 const AUCTION_STATUS_ROTATE_MS = 4000;
 const WITHDRAW_MIN_BRL = 100;
 
+// Notificação de "venda ao vivo" — dá clima de plataforma movimentada.
+// Nomes fixos (não inventa nome novo a cada vez), só o valor em AED muda.
+const SALE_NOTICE_NAMES = [
+  "Larissahype", "Biancaglow", "Camilastyle", "Julyabeauty", "Ravenacrush",
+  "Nathyvibes", "Thainaflow", "Poliveluxe", "Aninhacore", "Letifans",
+  "Gabivibes", "Monivelvet", "Dandaflow", "Ellencrush", "Taisdreams",
+  "Barbaraglow", "Ingridcore", "Samyhype", "Vitoriafans", "Milaveluxe",
+  "Karolstyle", "Debyglow", "Fabihype", "Renatacrush", "Alessaflow",
+  "Yasminfans", "Priscilavibes", "Wandacore", "Sabrinahype", "Lorenaglow",
+  "Ketllenflow", "Andressacrush", "Marianaveluxe", "Talitahype", "Brunacore",
+  "Nayaraglow", "Suelenflow", "Rebecacrush", "Aleteiafans", "Jamillehype",
+  "Cintiaveluxe", "Marcelacore", "Dayaneflow", "Michelyglow", "Rosianehype",
+  "Elainecrush", "Patriciavibes", "Simonefans", "Adrianacore", "Luanaflow",
+];
+const SALE_NOTICE_INTERVAL_MS = 2 * 60 * 1000;
+const SALE_NOTICE_FIRST_DELAY_MS = 8000;
+const SALE_NOTICE_VISIBLE_MS = 6000;
+
 function formatCountdown(totalSeconds: number) {
   const m = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
   const s = String(totalSeconds % 60).padStart(2, "0");
@@ -238,6 +256,8 @@ type Account = {
   publicacoes: number;
   colecoes: number;
   gorjetas: number;
+  pixFullName: string | null;
+  pixKey: string | null;
 };
 
 // Usado no primeiro render e como fallback se a API não responder.
@@ -253,6 +273,8 @@ const DEFAULT_ACCOUNT: Account = {
   publicacoes: 890,
   colecoes: 280,
   gorjetas: 70,
+  pixFullName: null,
+  pixKey: null,
 };
 
 
@@ -270,6 +292,8 @@ function Avatar({ name, photo, size = "md" }: { name: string; photo?: string; si
         alt={name}
         width={44}
         height={44}
+        loading="lazy"
+        decoding="async"
         className={`${dims} shrink-0 rounded-full object-cover`}
       />
     );
@@ -309,6 +333,8 @@ function Dashboard() {
   const [acceptingBidId, setAcceptingBidId] = useState<number | null>(null);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [saleNotice, setSaleNotice] = useState<{ bidderName: string; amount: number } | null>(null);
+  // Toast de "venda ao vivo" — decorativo, não é dado real de ninguém.
+  const [liveSaleNotice, setLiveSaleNotice] = useState<{ name: string; amountAED: number } | null>(null);
   const [showEnteredNotice, setShowEnteredNotice] = useState(false);
   const enteredNoticeShownRef = useRef<string | null>(null); // evita repetir pro mesmo leilão
   const [loggedIn, setLoggedIn] = useState(false);
@@ -431,12 +457,39 @@ function Dashboard() {
 
   // Embaralha a ordem dos posts iniciais a cada 2 minutos, pra quem fica com
   // a aba aberta não ver sempre a mesma sequência. As fotos/avatares
-  // continuam grudados em cada criadora (só a ordem de exibição muda).
+  // continuam grudados em cada criadora (só a ordem de exibição muda). Só
+  // troca se ela estiver com a tela no topo — nunca reordena o feed embaixo
+  // de quem está lendo no meio da rolagem.
   useEffect(() => {
     const id = setInterval(() => {
-      setFeedOrder(shuffle(posts));
+      if (window.scrollY < 80) {
+        setFeedOrder(shuffle(posts));
+      }
     }, FEED_REORDER_MS);
     return () => clearInterval(id);
+  }, []);
+
+  // Toast de "venda ao vivo" a cada 2 minutos — pool fixo de 50 nomes
+  // (embaralhado uma vez, não inventa nome novo), valor só em AED.
+  const saleNoticeNamesRef = useRef<string[]>(shuffle(SALE_NOTICE_NAMES));
+  const saleNoticeIndexRef = useRef(0);
+  useEffect(() => {
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const fireNotice = () => {
+      const names = saleNoticeNamesRef.current;
+      const name = names[saleNoticeIndexRef.current % names.length]!;
+      saleNoticeIndexRef.current += 1;
+      const amountAED = 25 + Math.floor(Math.random() * 71); // 25–95 AED
+      setLiveSaleNotice({ name, amountAED });
+      hideTimer = setTimeout(() => setLiveSaleNotice(null), SALE_NOTICE_VISIBLE_MS);
+    };
+    const firstTimer = setTimeout(fireNotice, SALE_NOTICE_FIRST_DELAY_MS);
+    const interval = setInterval(fireNotice, SALE_NOTICE_INTERVAL_MS);
+    return () => {
+      clearTimeout(firstTimer);
+      clearInterval(interval);
+      clearTimeout(hideTimer);
+    };
   }, []);
 
   // O usuário rola o feed inicial normalmente; ao chegar no fim aparece um
@@ -772,6 +825,13 @@ function Dashboard() {
                   Entrar
                 </Link>
               )}
+              <Link
+                to="/minha-conta"
+                className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-muted-foreground lg:hidden"
+                aria-label="Minha conta"
+              >
+                <Wallet className="h-5 w-5" />
+              </Link>
               <button className="grid h-10 w-10 place-items-center rounded-xl bg-muted text-muted-foreground">
                 <Bell className="h-5 w-5" />
               </button>
@@ -1371,6 +1431,29 @@ function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Toast "venda ao vivo" — decorativo, dá clima de plataforma
+          movimentada. Não bloqueia clique, some sozinho. */}
+      {liveSaleNotice && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 sm:bottom-6 sm:justify-start sm:left-6 sm:px-0">
+          <div
+            key={`${liveSaleNotice.name}-${liveSaleNotice.amountAED}`}
+            className="pointer-events-auto flex w-full max-w-xs items-center gap-3 rounded-2xl bg-card p-3 animate-in fade-in slide-in-from-bottom-4 duration-300"
+            style={{ boxShadow: "0 20px 50px -15px rgba(0,0,0,0.45)" }}
+          >
+            <div
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-brand-foreground"
+              style={{ background: "var(--gradient-brand)" }}
+            >
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <p className="min-w-0 text-sm leading-snug">
+              <span className="font-bold">{liveSaleNotice.name}</span> vendeu a foto por{" "}
+              <span className="font-bold text-brand">AED {liveSaleNotice.amountAED}</span>
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1533,6 +1616,8 @@ function PostCard({
           src={post.image}
           alt={post.text}
           loading={priority ? "eager" : "lazy"}
+          decoding="async"
+          fetchPriority={priority ? "high" : "low"}
           style={{ aspectRatio: post.imageRatio }}
           className="post-image-locked block w-full max-h-[75vh] object-contain bg-muted"
           onError={(e) => {
